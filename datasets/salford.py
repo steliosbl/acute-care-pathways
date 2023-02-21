@@ -1,7 +1,8 @@
 import pandas as pd
+import numpy as np
 
-from .salford_raw import SalfordTimeseries
-from utils import DotDict
+from .salford_raw import SalfordTimeseries, RedundantColumns, RawTimeseries
+from .utils import DotDict
 
 
 class SalfordData(pd.DataFrame):
@@ -177,6 +178,87 @@ class SalfordData(pd.DataFrame):
             )
         )
 
+    @classmethod
+    def from_raw(cls, raw):
+        """ Applies initial pre-processing steps to the raw dataset, extracted from xlsx """
+        # Get rid of various unnecessary columns, such as timeseries collection dates
+        df = raw.drop(RedundantColumns, axis=1)
+
+        # Identify these placeholder values as missing in their respective columns
+        make_nan = {
+            "Gender": "Other",
+            "Ethnicity": "NOT STATED",
+            "AE_MainDiagnosis": "UNKNOWN",
+            "AE_Location": "System Generated",
+        }
+        for col_name, nan_value in make_nan.items():
+            df[col_name] = df[col_name].replace(nan_value, np.nan)
+
+        # Reindex by spellserial, as numbering from excel is inconsistent
+        df = df.set_index("SpellSerial")
+
+        # Remove patients who have not been discharged yet
+        df = df[df.LOSBand != "Still In"]
+
+        # Filter patients without an ID or age, at minimum, and make these columns integers
+        df = df[~(df.PatientNumber.isna() | df.Age.isna())].copy()
+        df.Age = df.Age.astype(int)
+        df.PatientNumber = df.PatientNumber.astype(int)
+
+        # Convert the following columns to bool
+        binarize = [
+            ("Gender", ["Female"]),
+            ("DiedDuringStay", ["Yes"]),
+            ("DiedWithin30Days", ["Yes"]),
+            ("AdmissionType", ["Elective"]),
+            ("CareHome", ["Yes"]),
+            ("Resus_Status", ["DNA - CPR", "Unified DNA - CPR"]),
+        ]
+
+        for col_name, true_values in binarize:
+            df[col_name] = (
+                df[col_name]
+                .apply(true_values.__contains__)
+                .apply(lambda x: np.nan if x == NotImplemented else x)
+            )
+
+        # Rename some columns, including all time series
+        renaming = {
+            "Gender": "Female",
+            "AdmissionType": "ElectiveAdmission",
+            "Resus_Status": "HasDNAR",
+            "AdmitWardLoS": "AdmitWardLOS",
+            "CFS_score": "CFS_Score",
+        }
+
+        # Naming scheme to use for time series
+        timeseries_labelling = ["Admission", "24HPostAdm", "24HPreDisch", "Discharge"]
+        df = df.rename(
+            columns=renaming
+            | {
+                col: f"{parent}_{timeseries_labelling[i]}"
+                for parent, cols in RawTimeseries.items()
+                for i, col in enumerate(cols)
+            }
+        )
+
+        # Simplify A&E patient groups by combining all trauma admissions & making values lowercase
+        AE_Patient_Group_Aggregation = {
+            "FALLS": "TRAUMA",
+            "ACCIDENT": "TRAUMA",
+            "SELF HARM": "TRAUMA",
+            "ROAD TRAFFIC ACCIDENT": "TRAUMA",
+            "ASSAULT": "TRAUMA",
+            "SPORTS INJURY": "TRAUMA",
+            "KNIFE INJURIES INFLICTED": "TRAUMA",
+            "FIREWORK INJURY": "TRAUMA",
+        }
+        df["AE_PatientGroup"] = df.AE_PatientGroup.replace(
+            AE_Patient_Group_Aggregation
+        ).str.lower()
+
+        return cls(df)
+
 
 SalfordFeatures = DotDict(
     Admin=["SpellSerial", "PatientNumber",],
@@ -249,4 +331,7 @@ SalfordFeatures = DotDict(
         if str(parent).startswith("NEWS_")
     ],
     CompositeScores=["CFS_Score", "Waterlow_Score", "Waterlow_Outcome"],
+)
+SalfordFeatures.Timeseries = dict(
+    NEWS=SalfordFeatures.NEWS, Blood=SalfordFeatures.Blood, VBG=SalfordFeatures.VBG
 )
