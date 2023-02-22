@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import json
 
 from .salford_raw import SalfordTimeseries, RedundantColumns, RawTimeseries
 from .icd10 import ICD10Table
@@ -174,6 +175,62 @@ class SalfordData(pd.DataFrame):
 
         return self._finalize_derived_feature(series, col_name, return_series)
 
+    def derive_charlson_index(
+        self, col_name="CharlsonIndex", return_series=False, comorbidities_lookup=None
+    ):
+        """ Derives the Charlson Comorbidity Index score based on comorbidity severity
+        :param comorbidities_lookup: Lookup table (dict) identifying ICD-10 3-codes as relevant comorbidities
+        :returns: New SalfordData instance with the new features added
+            if return_series: pd.Series instance of the new feature
+        """
+        # Scores from: https://www.mdcalc.com/calc/3917/charlson-comorbidity-index-cci
+        charlson_scores = {
+            "myocardial_infarction": 1,
+            "congestive_heart_failure": 1,
+            "periphral_vascular_disease": 1,
+            "cerebrovascular_disease": 1,
+            "dementia": 1,
+            "chronic_pulmonary_disease": 1,
+            "connective_tissue_disease_rheumatic_disease": 1,
+            "peptic_ulcer_disease": 1,
+            "mild_liver_disease": 1,
+            "diabetes_wo_complications": 1,
+            "diabetes_w_complications": 2,
+            "paraplegia_and_hemiplegia": 2,
+            "renal_disease": 2,
+            "cancer": 2,
+            "moderate_or_sever_liver_disease": 3,
+            "metastitic_carcinoma": 6,
+            "aids_hiv": 6,
+        }
+
+        if comorbidities_lookup is None:
+            comorbidities_lookup = json.load(
+                open("data/icd10/charlson_elixhauser10.json")
+            )
+
+        # Get the comorbidity component of the Index first
+        series = (
+            (
+                # Convert the ICD-10 coded diagnoses to 3-codes
+                self.derive_icd10_3codes(return_df=True)
+                # Identify the relevant comorbidities (set the rest to NaN)
+                .applymap(comorbidities_lookup.get)
+                # Substitute the comorbidities with their scores
+                .applymap(charlson_scores.get)
+            )
+            .sum(axis=1)
+            .fillna(0)
+        )
+
+        # Get the age component
+        series[(50 < self.Age) & (self.Age <= 59)] += 1
+        series[(60 < self.Age) & (self.Age <= 69)] += 2
+        series[(70 < self.Age) & (self.Age <= 79)] += 3
+        series[self.Age > 79] += 4
+
+        return self._finalize_derived_feature(series, col_name, return_series)
+
     def clean_icd10(self, return_df=False):
         """ Standardises the ICD-10 diagnosis entries to match the lookup table 
         :returns: New SalfordData instance with the entries altered
@@ -185,7 +242,20 @@ class SalfordData(pd.DataFrame):
             df, SalfordFeatures.Diagnoses, return_df
         )
 
-    def derive_ccs(self, return_df=False, clean_icd10=True, grouping='HSMR'):
+    def derive_icd10_3codes(self, return_df=False, clean_icd10=True):
+        """ Converts the ICD-10 diagnosis entries to 3-codes (e.g., "X10.31" -> "X10")
+        :param clean_icd10: Whether to standardise the ICD-10 codes first
+        :returns: New SalfordData instance with the entries altered
+            if return_df: pd.DataFrame instance with the cleaned entries
+        """
+
+        df = self.Diagnoses.stack().str.split(".").str[0].unstack()
+
+        return self._finalize_derived_feature_wide(
+            df, SalfordFeatures.Diagnoses, return_df
+        )
+
+    def derive_ccs(self, return_df=False, clean_icd10=True, grouping="HSMR"):
         """ Computes the CCS codes for the patients' ICD-10 diagnoses 
         :param clean_icd10: Whether to standardise the ICD-10 codes first. REQUIRED if it has not already been done.
         :param grouping: CCS sub-grouping scheme to use. Must be one of ['SHMI', 'HSMR', None]. 
@@ -193,18 +263,20 @@ class SalfordData(pd.DataFrame):
             if return_df: pd.DataFrame instance with the cleaned entries
         :raises ValueError: If the $grouping value is invalid.
         """
-        if grouping not in ['SHMI', 'HSMR', None]:
+        if grouping not in ["SHMI", "HSMR", None]:
             raise ValueError('The `grouping` must be one of "SHMI", "HSMR", or None.')
-        
+
         icd10 = self.clean_icd10(return_df=True) if clean_icd10 else self.Diagnoses
         df = CCSTable.fuzzy_match(icd10)
 
-        if grouping == 'HSMR':
+        if grouping == "HSMR":
             df = CCSTable.convert_hsmr(df)
-        elif grouping == 'SHMI':
+        elif grouping == "SHMI":
             df = CCSTable.convert_shmi(df)
-        
-        return self._finalize_derived_feature_wide(df, SalfordFeatures.Diagnoses, return_df)
+
+        return self._finalize_derived_feature_wide(
+            df, SalfordFeatures.Diagnoses, return_df
+        )
 
     def augment_derive_all(self, within=1):
         return SalfordData(

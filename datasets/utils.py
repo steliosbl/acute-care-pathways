@@ -39,5 +39,5 @@ def justify(df, invalid_val=np.nan, axis=1, side="left"):
         out[justified_mask] = df.values[mask]
     else:
         out.T[justified_mask.T] = df.values.T[mask.T]
-        
+
     return pd.DataFrame(out, columns=df.columns, index=df.index)
