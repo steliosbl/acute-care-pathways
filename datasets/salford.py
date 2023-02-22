@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 
 from .salford_raw import SalfordTimeseries, RedundantColumns, RawTimeseries
+from .icd10 import ICD10Table
+from .ccs import CCSTable
 from .utils import DotDict
 
 
@@ -22,19 +24,29 @@ class SalfordData(pd.DataFrame):
 
     def _finalize_derived_feature(self, series, col_name, return_series):
         """ Given a derived feature in pd.Series form, 
-        concatenates it to the dataframe under $col_name$ or reindexes to match the dataframe """
+        concatenates it to the dataset under $col_name$ or reindexes to match the dataset """
 
         if return_series:
             return series.reindex_like(self).rename(col_name)
 
         r = self.copy()
         r[col_name] = series
-        return r
+        return SalfordData(r)
+
+    def _finalize_derived_feature_wide(self, df, col_names, return_df):
+        """ Given a derived feature in wide (pd.DataFrame) form,
+        concatenates it to the dataset under $col_names$ or reindexes to match the dataset """
+        if return_df:
+            return df.reindex(index=self.index, columns=col_names)
+
+        r = self.copy()
+        r[col_names] = df
+        return SalfordData(r)
 
     def derive_mortality(self, within=1, col_name="Mortality", return_series=False):
         """ Determines the patients' mortality outcome.
         :param within: Time since admission to consider a death. E.g., 1.0 means died within 24 hours, otherwise lived past 24 hours
-        :return: New SalfordData instance with the new feature added under $col_name
+        :returns: New SalfordData instance with the new feature added under $col_name
             if return_series: pd.Series instance of the new feature
             if return_threshold: pd.Series instance with the times the outcome occurred, if applicable
         """
@@ -56,7 +68,7 @@ class SalfordData(pd.DataFrame):
         :param within: Threshold of maximum LOS to consider events for. Critical care admission that occurs after this value won't be counted.
         :param wards: The wards to search for. By default, ['CCU']
         :param ignore_admit_ward: Ignore patients admitted directly to critical care
-        :return: New SalfordData instance with the new features added
+        :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
         """
         wards_to_check = SalfordFeatures.Wards
@@ -93,7 +105,7 @@ class SalfordData(pd.DataFrame):
     ):
         """ Determines critical event occurrence, i.e., a composite of critical care admission or mortality
         :param within: Threshold of maximum LOS to consider events for. Critical care admission or mortality that occurs after this value won't be counted.
-        :return: New SalfordData instance with the new features added
+        :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
         """
 
@@ -118,7 +130,7 @@ class SalfordData(pd.DataFrame):
         """ Determines whether each record is a readmission, 
         i.e. the same patient appeared in a previous record (chronologically) within the specified time window 
         :param within: Maximum time between last discharge and latest admission to consider a readmission
-        :return: New SalfordData instance with the new features added
+        :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
         """
         series = self._readmission_time_spans() < pd.Timedelta(days=within)
@@ -136,7 +148,7 @@ class SalfordData(pd.DataFrame):
     ):
         """ Bins all readmissions (re-appearances of patients) depending on the elapsed time between the last discharge and latest admission 
         :param within: Maximum time between last discharge and latest admission to consider a readmission
-        :return: New SalfordData instance with the new features added
+        :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
         """
         bins = [pd.Timedelta(days=_) for _ in [-1] + bins]
@@ -155,12 +167,44 @@ class SalfordData(pd.DataFrame):
     ):
         """ Determines whether the patient originally was admitted to SDEC 
         :param sdec_wards: The wards to search for. By default, ['AEC', 'AAA']
-        :return: New SalfordData instance with the new features added
+        :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
         """
         series = self.AdmitWard.isin(sdec_wards)
 
         return self._finalize_derived_feature(series, col_name, return_series)
+
+    def clean_icd10(self, return_df=False):
+        """ Standardises the ICD-10 diagnosis entries to match the lookup table 
+        :returns: New SalfordData instance with the entries altered
+            if return_df: pd.DataFrame instance with the cleaned entries
+        """
+        df = ICD10Table.fuzzy_match(self.Diagnoses)
+
+        return self._finalize_derived_feature_wide(
+            df, SalfordFeatures.Diagnoses, return_df
+        )
+
+    def derive_ccs(self, return_df=False, clean_icd10=True, grouping='HSMR'):
+        """ Computes the CCS codes for the patients' ICD-10 diagnoses 
+        :param clean_icd10: Whether to standardise the ICD-10 codes first. REQUIRED if it has not already been done.
+        :param grouping: CCS sub-grouping scheme to use. Must be one of ['SHMI', 'HSMR', None]. 
+        :returns: New SalfordData instance with the CCS in place of the ICD-10
+            if return_df: pd.DataFrame instance with the cleaned entries
+        :raises ValueError: If the $grouping value is invalid.
+        """
+        if grouping not in ['SHMI', 'HSMR', None]:
+            raise ValueError('The `grouping` must be one of "SHMI", "HSMR", or None.')
+        
+        icd10 = self.clean_icd10(return_df=True) if clean_icd10 else self.Diagnoses
+        df = CCSTable.fuzzy_match(icd10)
+
+        if grouping == 'HSMR':
+            df = CCSTable.convert_hsmr(df)
+        elif grouping == 'SHMI':
+            df = CCSTable.convert_shmi(df)
+        
+        return self._finalize_derived_feature_wide(df, SalfordFeatures.Diagnoses, return_df)
 
     def augment_derive_all(self, within=1):
         return SalfordData(
