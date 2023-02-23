@@ -278,6 +278,36 @@ class SalfordData(pd.DataFrame):
             df, SalfordFeatures.Diagnoses, return_df
         )
 
+    def clean_ae_text(self, return_df=False):
+        """ Clean AE text fields using same simple processing as the previous study
+            :returns: New SalfordData instance with clean text columns in place of old ones
+            if return_df: pd.DataFrame instance with cleaned entries
+        """
+        # Filter vague diagnosis
+        diag, complaint = 'AE_MainDiagnosis', 'AE_PresentingComplaint'
+        text_df = self[[diag, complaint]]
+
+        vague = [
+            "referral to service (procedure)",
+            "generally unwell (finding)",
+            "unwell adult",
+            "unknown",
+            "other",
+            "general deterioration",
+            "generally unwell",
+            "gen unwell",
+        ]
+        for col in text_df.columns:
+            text_df[col] = text_df[col].str.lower().str.strip(" .?+")
+            text_df.loc[text_df[col].isin(vague), col] = "other"
+
+        mask = (~text_df[complaint].isin(text_df[complaint].value_counts().head(50).index)) & (
+            text_df[complaint].notna()
+        )
+        text_df.loc[mask, complaint] = "other"
+
+        return self._finalize_derived_feature_wide(text_df, [diag, complaint], return_df)
+
     def augment_derive_all(self, within=1):
         return SalfordData(
             pd.concat(
