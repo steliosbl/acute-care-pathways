@@ -53,6 +53,29 @@ class SalfordData(pd.DataFrame):
 
         return SalfordData(r)
 
+    def encode_onehot(self, cols, prefix, drop_old=True, return_df=False):
+        """Given a set of columns, one-hot encodes them
+        :param cols: The columns to encode
+        :param prefix: What to call the new columns
+        :param drop_old: Whether to drop the original columns after concatenating the encoded ones
+        :return: New SalfordData instance with the one hot features added
+            if return_series: pandas.DataFrame instance of the one hot columns
+        """
+        if not (set(cols) <= set(self.columns)):
+            raise KeyError(
+                f"Some of the given columns do not exist: {set(cols)-set(self.columns)}"
+            )
+
+        encoded = (
+            pd.get_dummies(self[cols].stack(), prefix=prefix, prefix_sep="__")
+            .groupby(level=0)
+            .any()
+        )
+
+        drop_cols = None if return_df or not drop_old else cols
+
+        return self._finalize_derived_feature_wide(encoded, encoded.columns, return_df, drop_cols)
+
     def derive_mortality(self, within=1, col_name="Mortality", return_series=False):
         """ Determines the patients' mortality outcome.
         :param within: Time since admission to consider a death. E.g., 1.0 means died within 24 hours, otherwise lived past 24 hours
