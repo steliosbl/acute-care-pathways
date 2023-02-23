@@ -34,14 +34,23 @@ class SalfordData(pd.DataFrame):
         r[col_name] = series
         return SalfordData(r)
 
-    def _finalize_derived_feature_wide(self, df, col_names, return_df):
+    def _finalize_derived_feature_wide(self, df, col_names, return_df, drop_cols=None):
         """ Given a derived feature in wide (pd.DataFrame) form,
-        concatenates it to the dataset under $col_names$ or reindexes to match the dataset """
+        concatenates it to the dataset under $col_names$ or reindexes to match the dataset
+        :param drop_cols: If not None, drop these cols from the returned SalfordData object
+        raises ValueError if drop_cols is passed and return_df=True, as this makes no sense
+        """
         if return_df:
+            if drop_cols:
+                raise ValueError('drop_cols must be None if returning pandas.DataFrame object')
             return df.reindex(index=self.index, columns=col_names)
 
         r = self.copy()
         r[col_names] = df
+
+        if drop_cols:
+            r = r.drop(drop_cols, axis=1)
+
         return SalfordData(r)
 
     def derive_mortality(self, within=1, col_name="Mortality", return_series=False):
@@ -277,6 +286,73 @@ class SalfordData(pd.DataFrame):
         return self._finalize_derived_feature_wide(
             df, SalfordFeatures.Diagnoses, return_df
         )
+
+    def derive_ae_diagnosis_stems(self, stems=None, onehot=True, return_df=False):
+        """ Derive stems from AE Diagnosis column
+        :param stems: List of stems to derive, if None use defaults
+        :param onehot: Return onehot encoded version of columns
+        :return: New SalfordData instance with the encoded columns in place of the original AE columns
+            if return_df: pd.DataFrame instance with the cleaned entries
+        """
+        if stems is None:
+            stems = [
+                "confus",
+                "weak",
+                "found",
+                "fof",
+                "dementia",
+                "discharged",
+                "sob",
+                "unwitnessed",
+                "gcs",
+                "diarrh",
+                "vomit",
+                "collaps",
+                "sudden",
+                "woke",
+                "dizz",
+                "tight",
+                "head",
+                "fall",
+                "fell",
+                "pain",
+                "bang",
+                "mobility",
+                "cope",
+                "coping",
+                "weak",
+                "deterio",
+            ]
+        cols = ['AE_MainDiagnosis', 'AE_PresentingComplaint']
+        ae_df = self[cols]
+
+        if onehot:
+            for c in ae_df.columns:
+                encoded = (
+                    pd.get_dummies(
+                        ae_df[c].str.lower().str.extract(
+                            "(" + "|".join(stems) + ")", expand=False
+                        ),
+                        prefix=c,
+                        prefix_sep='__',
+                    )
+                    .groupby(level=0)
+                    .sum()
+                ).astype(int)
+                encoded = encoded.fillna(np.nan)
+                ae_df = pd.concat([ae_df, encoded], axis=1)
+
+                ae_df = ae_df.drop(c, axis=1)
+                cols = ae_df.columns
+        else:
+            ae_df['AE_MainDiagnosis'] = ae_df['AE_MainDiagnosis'].str.lower().str.extract(
+                "(" + "|".join(stems) + ")", expand=False
+            )
+
+        # TODO: Is there a nicer way of doing this (i.e. dropping cols from self)?
+        drop_cols = None if return_df else ['AE_MainDiagnosis', 'AE_PresentingComplaint']
+
+        return self._finalize_derived_feature_wide(ae_df, cols, return_df, drop_cols)
 
     def clean_ae_text(self, return_df=False):
         """ Clean AE text fields using same simple processing as the previous study
