@@ -2,7 +2,13 @@ import pandas as pd
 import numpy as np
 import json
 
-from .salford_raw import SalfordTimeseries, RedundantColumns, RawTimeseries, AEDiagnosisStems, AEVaguePresentingComplaints
+from .salford_raw import (
+    SalfordTimeseries,
+    RedundantColumns,
+    RawTimeseries,
+    AEDiagnosisStems,
+    AEVaguePresentingComplaints,
+)
 from .icd10 import ICD10Table
 from .ccs import CCSTable
 from .utils import DotDict
@@ -48,18 +54,20 @@ class SalfordData(pd.DataFrame):
 
         return SalfordData(r)
 
-    def _encode_onehot(self, df, prefix, prefix_sep='__'):
-        """Given a set of columns, one-hot encodes them
+    def _encode_onehot(self, df, prefix, prefix_sep="__", fillna=False, return_df=True):
+        """ Given a set of columns, one-hot encodes them
         :param df: The dataframe to encode
         :param prefix: What to call the new columns
         """
         encoded = (
-            pd.get_dummies(self[cols].stack(), prefix=prefix, prefix_sep=prefix_sep)
+            pd.get_dummies(df.stack(), prefix=prefix, prefix_sep=prefix_sep)
             .groupby(level=0)
             .any()
         )
 
-        return self._finalize_derived_feature_wide(encoded, encoded.columns, return_df=True)
+        return self._finalize_derived_feature_wide(
+            encoded, encoded.columns, return_df=return_df
+        )
 
     def derive_mortality(self, within=1, col_name="Mortality", return_series=False):
         """ Determines the patients' mortality outcome.
@@ -295,55 +303,36 @@ class SalfordData(pd.DataFrame):
             df, SalfordFeatures.Diagnoses, return_df
         )
 
-    def derive_ae_diagnosis_stems(self, stems=AEDiagnosisStems, onehot=True, return_df=False):
+    def derive_ae_diagnosis_stems(self, stems=AEDiagnosisStems, return_df=False):
         """ Derive stems from AE Diagnosis column
-        :param stems: List of stems to derive, if None use defaults
-        :param onehot: Return onehot encoded version of columns
+        :param stems: List of stems to derive
         :return: New SalfordData instance with the encoded columns in place of the original AE columns
             if return_df: pd.DataFrame instance with the cleaned entries
         """
-        cols = ['AE_MainDiagnosis', 'AE_PresentingComplaint']
-        ae_df = self[cols]
+        # TODO: This actually doesn't catch multiple stems in the same entry
+        df = self._encode_onehot(
+            self.AE_MainDiagnosis.str.lower().str.extract(
+                f'({"|".join(stems)})', expand=True
+            ),
+            prefix="AE_MainDiagnosis",
+            return_df=True,
+        )
+        df.loc[self.AE_MainDiagnosis.isna()] = np.nan
 
-        if onehot:
-            for c in ae_df.columns:
-                encoded = (
-                    pd.get_dummies(
-                        ae_df[c].str.lower().str.extract(
-                            "(" + "|".join(stems) + ")", expand=False
-                        ),
-                        prefix=c,
-                        prefix_sep='__',
-                    )
-                    .groupby(level=0)
-                    .sum()
-                ).astype(int)
-                encoded = encoded.fillna(np.nan)
-                ae_df = pd.concat([ae_df, encoded], axis=1)
-
-                ae_df = ae_df.drop(c, axis=1)
-                cols = ae_df.columns
-        else:
-            ae_df['AE_MainDiagnosis'] = ae_df['AE_MainDiagnosis'].str.lower().str.extract(
-                "(" + "|".join(stems) + ")", expand=False
-            )
-
-        # TODO: Is there a nicer way of doing this (i.e. dropping cols from self)?
-        drop_cols = None if return_df else ['AE_MainDiagnosis', 'AE_PresentingComplaint']
-
-        return self._finalize_derived_feature_wide(ae_df, cols, return_df, drop_cols)
+        return self._finalize_derived_feature_wide(df, df.columns, return_df)
 
     def augment_derive_all(self, within=1):
         return SalfordData(
             pd.concat(
                 [
-                    self.copy(),
+                    self.drop("AE_MainDiagnosis", axis=1),
                     self.derive_mortality(within=within, return_series=True),
                     self.derive_critical_care(within=within, return_series=True),
                     self.derive_critical_event(within=within, return_series=True),
                     self.derive_readmission(return_series=True),
                     self.derive_readmission_band(return_series=True),
                     self.derive_sdec(return_series=True),
+                    self.derive_ae_diagnosis_stems(return_df=True),
                 ],
                 axis=1,
             )
@@ -429,19 +418,18 @@ class SalfordData(pd.DataFrame):
         ).str.lower()
 
         # Remove vague values from the A&E presenting complaint and diagnosis
-        for col in ['AE_PresentingComplaint', 'AE_MainDiagnosis']:
+        for col in ["AE_PresentingComplaint", "AE_MainDiagnosis"]:
             df[col] = df[col].str.lower().str.strip(" .?+")
             df.loc[df[col].isin(AEVaguePresentingComplaints), col] = np.nan
-        
+
         # Cut out all but the top-50 most frequent presenting complaints.
         # These make up about 97% of available values, which is enough
         mask = (
             ~df.AE_PresentingComplaint.isin(
                 df.AE_PresentingComplaint.value_counts().head(50).index
-            )) & (
-                df.AE_PresentingComplaint.notna()
-        )
-        df.loc[mask, 'AE_PresentingComplaint'] = np.nan
+            )
+        ) & (df.AE_PresentingComplaint.notna())
+        df.loc[mask, "AE_PresentingComplaint"] = np.nan
 
         return cls(df)
 
