@@ -212,3 +212,43 @@ RedundantColumns = [
 ] + [
     'AdmitWardEnd', 'CFS_recorded_dtm', 'Waterlow_recorded_dtm', 'Status_recorded_dtm', 'HaemFirst_recorded_dtm', 'Haem24HPostAdm_recorded_dtm', 'Haem24HPreDsch_recorded_dtm', 'HaemLast_recorded_dtm', 'UreaFirst_recorded_dtm', 'Urea24HPostAdm_recorded_dtm', 'Urea24HPreDsch_recorded_dtm', 'UreaLast_recorded_dtm', 'SodiumFirst_recorded_dtm', 'Sodium24HPostAdm_recorded_dtm', 'Sodium24HPreDsch_recorded_dtm', 'SodiumLast_recorded_dtm', 'PotassiumFirst_recorded_dtm', 'Potassium24HPostAdm_recorded_dtm', 'Potassium24HPreDsch_recorded_dtm', 'PotassiumLast_recorded_dtm', 'CreatinineFirst_recorded_dtm', 'Creatinine24HPostAdm_recorded_dtm', 'Creatinine24HPreDsch_recorded_dtm','CreatinineLast_recorded_dtm','D-dimerFirst_recorded_dtm', 'D-dimer24HPostAdm_recorded_dtm', 'D-dimer24HPreDsch_recorded_dtm', 'D-dimerLast_recorded_dtm', 'CRPFirst_recorded_dtm', 'CRP24HPostAdm_recorded_dtm', 'CRP24HPreDsch_recorded_dtm', 'CRPLast_recorded_dtm', 'AlbuminFirst_recorded_dtm', 'Albumin24HPostAdm_recorded_dtm', 'Albumin24HPreDsch_recorded_dtm', 'AlbuminLast_recorded_dtm', 'WBCFirst_recorded_dtm', 'WBC24HPostAdm_recorded_dtm', 'WBC24HPreDsch_recorded_dtm', 'WBCLast_recorded_dtm', 'TempVenousFirst_recorded_dtm', 'TempVenous24HPostAdm_recorded_dtm', 'TempVenous24HPreDsch_recorded_dtm', 'TempVenousLast_recorded_dtm', 'pCO2VenousFirst_recorded_dtm', 'pCO2Venous24HPostAdm_recorded_dtm', 'pCO2Venous24HPreDsch_recorded_dtm', 'pCO2VenousLast_recorded_dtm', 'pCO2correctedFirst_recorded_dtm', 'pCO2corrected24HPostAdm_recorded_dtm', 'pCO2corrected24HPreDsch_recorded_dtm', 'pCO2correctedLast_recorded_dtm', 'PHFirst_recorded_dtm', 'PH24HPostAdm_recorded_dtm', 'PH24HPreDsch_recorded_dtm','PHLast_recorded_dtm', 'PHcorrectedFirst_recorded_dtm', 'PHcorrected24HPostAdm_recorded_dtm', 'PHcorrected24HPreDsch_recorded_dtm', 'PHcorrectedLast_recorded_dtm', 'PO2First_recorded_dtm', 'PO2_24HPostAdm_recorded_dtm', 'PO2_24HPreDsch_recorded_dtm', 'PO2Last_recorded_dtm', 'PO2correctedFirst_recorded_dtm', 'PO2corrected24HPostAdm_recorded_dtm', 'PO2corrected24HPreDsch_recorded_dtm', 'PO2correctedLast_recorded_dtm', 'NEWS_First_recorded_dtm', 'NEWS_24HPostAdm_recorded_dtm', 'NEWS_24HPreDsch_recorded_dtm', 'NEWS_Last_recorded_dtm', 
 ]
+
+AEDiagnosisStems = [
+    "confus",
+    "weak",
+    "found",
+    "fof",
+    "dementia",
+    "discharged",
+    "sob",
+    "unwitnessed",
+    "gcs",
+    "diarrh",
+    "vomit",
+    "collaps",
+    "sudden",
+    "woke",
+    "dizz",
+    "tight",
+    "head",
+    "fall",
+    "fell",
+    "pain",
+    "bang",
+    "mobility",
+    "cope",
+    "coping",
+    "weak",
+    "deterio",
+]
+
+AEVaguePresentingComplaints = [
+    "referral to service (procedure)",
+    "generally unwell (finding)",
+    "unwell adult",
+    "unknown",
+    "other",
+    "general deterioration",
+    "generally unwell",
+    "gen unwell",
+]
