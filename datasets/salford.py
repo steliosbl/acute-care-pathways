@@ -85,7 +85,7 @@ class SalfordData(pd.DataFrame):
     def derive_critical_care(
         self,
         within=1,
-        wards=["CCU"],
+        wards=["CCU", "HH1M"],
         col_name="CriticalCare",
         ignore_admit_ward=True,
         return_series=False,
@@ -200,6 +200,21 @@ class SalfordData(pd.DataFrame):
 
         return self._finalize_derived_feature(series, col_name, return_series)
 
+    def derive_ae_diagnosis_stems(
+        self, stems=AEDiagnosisStems, col_name="AE_MainDiagnosis", return_series=False
+    ):
+        """ Derive stems from AE Diagnosis column
+        :param stems: List of stems to derive
+        :returns: New SalfordData instance with the new features in place of the old column
+            if return_series: pd.Series instance of the new feature
+        """
+        # TODO: This actually doesn't catch multiple stems in the same entry
+        stems = self.AE_MainDiagnosis.str.lower().str.extract(
+            f'({"|".join(stems)})', expand=False
+        )
+
+        return self._finalize_derived_feature(stems, col_name, return_series)
+
     def derive_charlson_index(
         self, col_name="CharlsonIndex", return_series=False, comorbidities_lookup=None
     ):
@@ -303,36 +318,17 @@ class SalfordData(pd.DataFrame):
             df, SalfordFeatures.Diagnoses, return_df
         )
 
-    def derive_ae_diagnosis_stems(self, stems=AEDiagnosisStems, return_df=False):
-        """ Derive stems from AE Diagnosis column
-        :param stems: List of stems to derive
-        :return: New SalfordData instance with the encoded columns in place of the original AE columns
-            if return_df: pd.DataFrame instance with the cleaned entries
-        """
-        # TODO: This actually doesn't catch multiple stems in the same entry
-        df = self._encode_onehot(
-            self.AE_MainDiagnosis.str.lower().str.extract(
-                f'({"|".join(stems)})', expand=True
-            ),
-            prefix="AE_MainDiagnosis",
-            return_df=True,
-        )
-        df.loc[self.AE_MainDiagnosis.isna()] = np.nan
-
-        return self._finalize_derived_feature_wide(df, df.columns, return_df)
-
     def augment_derive_all(self, within=1):
         return SalfordData(
             pd.concat(
                 [
-                    self.drop("AE_MainDiagnosis", axis=1),
                     self.derive_mortality(within=within, return_series=True),
                     self.derive_critical_care(within=within, return_series=True),
                     self.derive_critical_event(within=within, return_series=True),
                     self.derive_readmission(return_series=True),
                     self.derive_readmission_band(return_series=True),
                     self.derive_sdec(return_series=True),
-                    self.derive_ae_diagnosis_stems(return_df=True),
+                    self.derive_ae_diagnosis_stems(return_series=True),
                 ],
                 axis=1,
             )
@@ -393,13 +389,14 @@ class SalfordData(pd.DataFrame):
 
         # Naming scheme to use for time series
         timeseries_labelling = ["Admission", "24HPostAdm", "24HPreDisch", "Discharge"]
-        df = df.rename(
+        df.rename(
             columns=renaming
             | {
                 col: f"{parent}_{timeseries_labelling[i]}"
                 for parent, cols in RawTimeseries.items()
                 for i, col in enumerate(cols)
-            }
+            },
+            inplace=True,
         )
 
         # Simplify A&E patient groups by combining all trauma admissions & making values lowercase
@@ -430,6 +427,44 @@ class SalfordData(pd.DataFrame):
             )
         ) & (df.AE_PresentingComplaint.notna())
         df.loc[mask, "AE_PresentingComplaint"] = np.nan
+
+        # Laboratory results cleaning:
+        # We eliminate these string values, as they make up very very few entries (mostly single digits each)
+        delete_from_bloods = dict(
+            Blood_Urea=[">107.0", ">53.6"],
+            Blood_Sodium=["<100", "<80", ">200", ">180"],
+            Blood_Potassium=[">10.0", "<1.5"],
+            Blood_Creatinine=[">2210"],
+            Blood_DDimer=["<21", "<100", ">69000"],
+            Blood_Albumin=["<10"],
+            VBG_O2=["<0.8"]
+        )
+        df.replace(
+            {
+                col: {val: np.nan for val in vals}
+                for timeseries, vals in delete_from_bloods.items()
+                for col in SalfordTimeseries[timeseries]
+            },
+            inplace=True,
+        )
+
+        # These string values in the blood results make up a large proportion of entries
+        # We replace them with a midpoint value, such as the midpoint between the value and zero
+        # or the midpoint between the value and the next smallest recorded value
+        convert_in_bloods = dict(
+            Blood_Urea={"<1.8": 0.9},
+            Blood_Creatinine={"<18": 9},
+            Blood_DDimer={"<150": 125},
+            Blood_CRP={"<4.0": 2.25, "<0.5": 0.25},
+        )
+        df.replace(
+            {
+                col: replacements
+                for timeseries, replacements in convert_in_bloods.items()
+                for col in SalfordTimeseries[timeseries]
+            },
+            inplace=True,
+        )
 
         return cls(df)
 
@@ -492,6 +527,12 @@ SalfordFeatures = DotDict(
         for col in cols
         if str(parent).startswith("Blood_")
     ],
+    AdmissionBlood=[
+        col
+        for parent, cols in SalfordTimeseries.items()
+        for col in cols
+        if str(parent).startswith("Blood_") and str(col).endswith("_Admission")
+    ],
     VBG=[
         col
         for parent, cols in SalfordTimeseries.items()
@@ -504,8 +545,17 @@ SalfordFeatures = DotDict(
         for col in cols
         if str(parent).startswith("NEWS_")
     ],
+    AdmissionNEWS=[
+        col
+        for parent, cols in SalfordTimeseries.items()
+        for col in cols
+        if str(parent).startswith("NEWS_") and str(col).endswith("_Admission")
+    ],
     CompositeScores=["CFS_Score", "Waterlow_Score", "Waterlow_Outcome"],
 )
-SalfordFeatures.Timeseries = dict(
-    NEWS=SalfordFeatures.NEWS, Blood=SalfordFeatures.Blood, VBG=SalfordFeatures.VBG
+
+SalfordFeatures["TimeSeries"] = dict(
+    NEWS=SalfordFeatures["NEWS"],
+    Blood=SalfordFeatures["Blood"],
+    VBG=SalfordFeatures["VBG"],
 )
