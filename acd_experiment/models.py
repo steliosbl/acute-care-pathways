@@ -158,7 +158,7 @@ class Estimator_XGBoost(Estimator):
 
     _requirements = dict(
         onehot=False,
-        ordinal=False,
+        ordinal=True,
         imputation=False,
         fillna=False,
         oneclass=False,
@@ -172,7 +172,7 @@ class Estimator_XGBoost(Estimator):
         n_jobs=1,
         objective="binary:logistic",
         booster="gbtree",
-        enable_categorical=True,
+        enable_categorical=False,
     )
 
     _tuning_params_default = dict(
