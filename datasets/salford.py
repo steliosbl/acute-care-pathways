@@ -85,7 +85,7 @@ class SalfordData(pd.DataFrame):
     def derive_critical_care(
         self,
         within=1,
-        wards=["CCU", "HH1M"],
+        wards=["CCU"],
         col_name="CriticalCare",
         ignore_admit_ward=True,
         return_series=False,
@@ -127,16 +127,28 @@ class SalfordData(pd.DataFrame):
         return self._finalize_derived_feature(series, col_name, return_series)
 
     def derive_critical_event(
-        self, within=1, col_name="CriticalEvent", return_series=False
+        self,
+        within=1,
+        col_name="CriticalEvent",
+        return_series=False,
+        wards=["CCU"],
+        ignore_admit_ward=True,
     ):
         """ Determines critical event occurrence, i.e., a composite of critical care admission or mortality
         :param within: Threshold of maximum LOS to consider events for. Critical care admission or mortality that occurs after this value won't be counted.
+        :param wards: The wards to search for to obtain critical care admission. By default, ['CCU']
+        :param ignore_admit_ward: Ignore patients admitted directly to critical care
         :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
         """
 
         mortality = self.derive_mortality(within=within, return_series=True)
-        critical = self.derive_critical_care(within=within, return_series=True)
+        critical = self.derive_critical_care(
+            within=within,
+            wards=wards,
+            ignore_admit_ward=ignore_admit_ward,
+            return_series=True,
+        )
 
         series = mortality | critical
 
@@ -322,17 +334,31 @@ class SalfordData(pd.DataFrame):
         return SalfordData(
             pd.concat(
                 [
+                    self.drop("AE_MainDiagnosis", axis=1),
                     self.derive_mortality(within=within, return_series=True),
                     self.derive_critical_care(within=within, return_series=True),
                     self.derive_critical_event(within=within, return_series=True),
                     self.derive_readmission(return_series=True),
-                    self.derive_readmission_band(return_series=True),
+                    # self.derive_readmission_band(return_series=True),
                     self.derive_sdec(return_series=True),
                     self.derive_ae_diagnosis_stems(return_series=True),
                 ],
                 axis=1,
             )
         )
+
+    def convert_str_to_categorical(self, columns=None, inplace=True):
+        """ Transforms all string columns into categorical types 
+        :columns: List of columns to convert. If empty, selects all string/object type columns
+        :returns SalfordData instance with the columns altered 
+            if inplace: Reference to the existing, altered SalfordData instance
+        """
+        df = self if inplace else self.copy()
+
+        selection = df[columns] if columns else df.select_dtypes("object")
+        df[selection.columns] = selection.astype("category")
+
+        return df
 
     @classmethod
     def from_raw(cls, raw):
@@ -437,7 +463,7 @@ class SalfordData(pd.DataFrame):
             Blood_Creatinine=[">2210"],
             Blood_DDimer=["<21", "<100", ">69000"],
             Blood_Albumin=["<10"],
-            VBG_O2=["<0.8"]
+            VBG_O2=["<0.8"],
         )
         df.replace(
             {
