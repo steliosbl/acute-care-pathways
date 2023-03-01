@@ -20,7 +20,7 @@ import shap
 
 from typing import Dict, Any, Iterable, Optional
 
-from .utils import group_explanations_by_categorical
+from .utils.systematic_comparison import group_explanations_by_categorical
 
 from joblib import Parallel, delayed
 

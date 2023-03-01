@@ -1,9 +1,10 @@
 from acd_experiment.systematic_comparison import construct_parser, run_experiment
 from acd_experiment.sci import SCIData, SCICols
 
-# from acd_experiment.salford_adapter import SalfordAdapter
+from acd_experiment.salford_adapter import SalfordAdapter
 from datasets.salford import SalfordData
 import pandas as pd
+import numpy as np
 
 import logging
 
@@ -23,7 +24,8 @@ if __name__ == "__main__":
         .mandate(SCICols.news_data_raw)
         .derive_ae_diagnosis_stems(onehot=False)
     )
-    # logging.info("Constructing Salford dataset")
-    # sal = pd.read_hdf(f'data/Salford/sal_processed.h5', 'table')
+    logging.info("Constructing Salford dataset")
+    sal = pd.read_hdf(f'data/Salford/sal_processed.h5', 'table')
+    sal = SalfordAdapter(sal.loc[np.intersect1d(sal.index, scii.SpellSerial)])
     logging.info("Starting experiment")
-    run_experiment(parser.parse_args(), scii)
+    run_experiment(parser.parse_args(), sal)

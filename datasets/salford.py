@@ -342,6 +342,7 @@ class SalfordData(pd.DataFrame):
                     # self.derive_readmission_band(return_series=True),
                     self.derive_sdec(return_series=True),
                     self.derive_ae_diagnosis_stems(return_series=True),
+                    self.derive_charlson_index(return_series=True),
                 ],
                 axis=1,
             )
@@ -492,7 +493,7 @@ class SalfordData(pd.DataFrame):
             inplace=True,
         )
 
-        return cls(df)
+        return cls(df).clean_icd10()
 
 
 SalfordFeatures = DotDict(

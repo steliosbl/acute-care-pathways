@@ -17,7 +17,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.calibration import CalibratedClassifierCV
 
 from .models import *
-from .utils import get_metrics, get_threshold_fpr
+from .utils.systematic_comparison import get_metrics, get_threshold_fpr
 from .base_dataset import BaseDataset
 
 from typing import Dict, Any, Iterable, Optional, Tuple, Callable
