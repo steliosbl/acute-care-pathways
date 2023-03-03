@@ -31,4 +31,7 @@ pip install -r requirements.txt
  - [Optuna](https://github.com/optuna/optuna) >= 3.0.2
  - [Shapely](https://github.com/shapely/shapely) >= 1.8.4
  - [imbalanced-Learn](https://github.com/scikit-learn-contrib/imbalanced-learn) >= 0.70.0
+ - [transformers](https://huggingface.co/docs/transformers/index) >= 4.26.1
+ - [datasets](https://huggingface.co/docs/datasets/index) >= 2.10.1
+ - [evaluate](https://huggingface.co/docs/evaluate/index) >= 0.4.0
  - Openpyxl
