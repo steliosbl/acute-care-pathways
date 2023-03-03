@@ -41,3 +41,12 @@ def justify(df, invalid_val=np.nan, axis=1, side="left"):
         out.T[justified_mask.T] = df.values.T[mask.T]
 
     return pd.DataFrame(out, columns=df.columns, index=df.index)
+
+
+def row_to_text(row):
+    text = ''
+
+    for c in row:
+        text += str(c) + '[SEP]'
+
+    return text

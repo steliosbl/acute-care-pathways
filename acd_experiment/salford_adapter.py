@@ -1,5 +1,5 @@
 from .base_dataset import BaseDataset
-from datasets.salford import SalfordData, SalfordFeatures
+from salford_datasets.salford import SalfordData, SalfordFeatures
 
 import pandas as pd
 
