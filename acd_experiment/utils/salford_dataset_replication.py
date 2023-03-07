@@ -5,13 +5,15 @@ from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 def plot_confusion_matrix(
     y_true,
     y_pred,
-    ax,
+    ax = None,
     display_labels=[1, 0],
     xlabel="True Class",
     ylabel="Predicted Class",
     plot_title="Confusion Matrix",
     normalize="true",
 ):
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(6,6))
     ax.grid(False)
     values_format = ".2%" if normalize else None
     cm_fig = ConfusionMatrixDisplay(
