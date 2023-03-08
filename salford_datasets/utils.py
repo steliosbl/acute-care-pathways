@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from functools import partial
 
 
 class DotDict(dict):
@@ -43,10 +44,46 @@ def justify(df, invalid_val=np.nan, axis=1, side="left"):
     return pd.DataFrame(out, columns=df.columns, index=df.index)
 
 
-def row_to_text(row):
+class Series:
+    @staticmethod
+    def topn_freq_values(s, n=10, sentinel=np.nan):
+        s[
+            ~s.isin(pd.DataFrame(s).stack().value_counts().head(n).index)
+        ] = sentinel
+        return s
+
+    @staticmethod
+    def invert_negatives(s):
+        s[s < 0] *= -1
+        return s
+
+    @staticmethod
+    def clip_sentinel(s, lower, upper, sentinel=np.nan):
+        s[(s <= lower) | (s >= upper)] = sentinel
+        return s
+
+    @staticmethod
+    def apply_clip_sentinel(lower, upper, sentinel=np.nan):
+        return partial(Series.clip_sentinel, lower=lower, upper=upper, sentinel=sentinel)
+
+    @staticmethod
+    def shift_triple_digit_values(s):
+        s[s >= 100] /= 10
+        return s
+
+    @staticmethod
+    def shift_single_digit_values(s):
+        s[s < 10] *= 10
+        return s
+
+
+def row_to_text(row, column_name=False):
     text = ''
 
-    for c in row:
-        text += str(c) + '[SEP]'
+    for i, c in enumerate(row):
+        if column_name:
+            text += f"{row.index[i]}: "
+
+        text += str(c) + ' [SEP] '
 
     return text

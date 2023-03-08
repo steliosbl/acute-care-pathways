@@ -140,6 +140,67 @@ RawTimeseries = {
         "NEWS_levelofcon_score_24HPreDsch",
         "NEWS_levelofcon_score_Last",
     ],
+"Obs_RespiratoryRate": [
+         "RespRate_first",
+         "RespRate_24HPostAdm",
+         "RespRate_24HPreDsch",
+         "RespRate_Last",
+     ],
+     "Obs_BreathingDevice": [
+         "O2_device/air_first",
+         "O2_device/air_24HPostAdm",
+         "O2_device/air_24HPreDsch",
+         "O2_device/air_Last",
+     ],
+     "Obs_O2Sats": [
+         "O2Sats_first",
+         "O2Sats_24HPostAdm",
+         "O2Sats_24HPreDsch",
+         "O2Sats_Last",
+     ],
+     "Obs_Temperature": [
+         "Temp_first",
+         "Temp_24HPostAdm",
+         "Temp_24HPreDsch",
+         "Temp_Last",
+     ],
+     "Obs_SystolicBP": [
+         "BPSystolic_first",
+         "BPSystolic_24HPostAdm",
+         "BPSystolic_24HPreDsch",
+         "BPSystolic_Last",
+     ],
+     "Obs_DiastolicBP": [
+         "BP_Diastolic_first",
+         "BP_Diastolic_24HPostAdm",
+         "BP_Diastolic_24HPreDsch",
+         "BP_Diastolic_Last",
+     ],
+     "Obs_HeartRate": [
+         "HeartRate_first",
+         "HeartRate_24HPostAdm",
+         "HeartRate_24HPreDsch",
+         "HeartRate_Last",
+     ],
+     "Obs_AVCPU": [
+         "LevelCons_first",
+         "LevelCons_24HPostAdm",
+         "LevelCons_24HPreDsch",
+         "LevelCons_Last",
+     ],
+     "Obs_Pain": ["Pain_First", "Pain_24HPostAdm", "Pain_24HPreDsch", "Pain_Last"],
+     "Obs_Nausea": [
+         "Nausea_First",
+         "Nausea_24HPostAdm",
+         "Nausea_24HPreDsch",
+         "Nausea_Last",
+     ],
+     "Obs_Vomiting": [
+         "Vomiting_First",
+         "Vomiting_24HPostAdm",
+         "Vomiting_24HPreDsch",
+         "Vomiting_Last",
+     ],
 }
 
 RawGroups = dict(
@@ -193,6 +254,9 @@ RawGroups = dict(
     NEWS=[
         col for col, parent in RawTimeseries.items() if str(parent).startswith("NEWS_")
     ],
+    Obs=[
+         col for col, parent in RawTimeseries.items() if str(parent).startswith("Obs_")
+     ],
     CompositeScores=["CFS_score", "Waterlow_Score", "Waterlow_Outcome"],
 )
 
@@ -325,3 +389,7 @@ AEVaguePresentingComplaints = [
     "generally unwell",
     "gen unwell",
 ]
+
+AVCPU_Ordered_Scale = ['A - Alert', 'V - Responds to voice', 'C - New onset of confusion', 'P - Responds to pain', 'U - Unconscious']
+
+Pain_Ordered_Scale = ['0 - No pain', '1 - Mild pain', '2 - Moderate pain', '3 - Severe pain']

@@ -8,10 +8,12 @@ from .salford_raw import (
     RawTimeseries,
     AEDiagnosisStems,
     AEVaguePresentingComplaints,
+    AVCPU_Ordered_Scale,
+    Pain_Ordered_Scale,
 )
 from .icd10 import ICD10Table
 from .ccs import CCSTable
-from .utils import DotDict, row_to_text
+from .utils import DotDict, Series, row_to_text
 
 
 class SalfordData(pd.DataFrame):
@@ -30,7 +32,7 @@ class SalfordData(pd.DataFrame):
             raise
 
     def _finalize_derived_feature(self, series, col_name, return_series):
-        """ Given a derived feature in pd.Series form,
+        """ Given a derived feature in pd.Series form, 
         concatenates it to the dataset under $col_name$ or reindexes to match the dataset """
 
         if return_series:
@@ -165,8 +167,8 @@ class SalfordData(pd.DataFrame):
     def derive_readmission(
         self, within=30, col_name="Readmission", return_series=False
     ):
-        """ Determines whether each record is a readmission,
-        i.e. the same patient appeared in a previous record (chronologically) within the specified time window
+        """ Determines whether each record is a readmission, 
+        i.e. the same patient appeared in a previous record (chronologically) within the specified time window 
         :param within: Maximum time between last discharge and latest admission to consider a readmission
         :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
@@ -184,7 +186,7 @@ class SalfordData(pd.DataFrame):
         col_name="ReadmissionBand",
         return_series=False,
     ):
-        """ Bins all readmissions (re-appearances of patients) depending on the elapsed time between the last discharge and latest admission
+        """ Bins all readmissions (re-appearances of patients) depending on the elapsed time between the last discharge and latest admission 
         :param within: Maximum time between last discharge and latest admission to consider a readmission
         :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
@@ -203,7 +205,7 @@ class SalfordData(pd.DataFrame):
     def derive_sdec(
         self, sdec_wards=["AEC", "AAA"], col_name="SentToSDEC", return_series=False
     ):
-        """ Determines whether the patient originally was admitted to SDEC
+        """ Determines whether the patient originally was admitted to SDEC 
         :param sdec_wards: The wards to search for. By default, ['AEC', 'AAA']
         :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
@@ -283,16 +285,6 @@ class SalfordData(pd.DataFrame):
 
         return self._finalize_derived_feature(series, col_name, return_series)
 
-    def clean_icd10(self, return_df=False):
-        """ Standardises the ICD-10 diagnosis entries to match the lookup table
-        :returns: New SalfordData instance with the entries altered
-            if return_df: pd.DataFrame instance with the cleaned entries
-        """
-        df = ICD10Table.fuzzy_match(self.Diagnoses)
-
-        return self._finalize_derived_feature_wide(
-            df, SalfordFeatures.Diagnoses, return_df
-        )
 
     def derive_icd10_3codes(self, return_df=False, clean_icd10=True):
         """ Converts the ICD-10 diagnosis entries to 3-codes (e.g., "X10.31" -> "X10")
@@ -308,9 +300,9 @@ class SalfordData(pd.DataFrame):
         )
 
     def derive_ccs(self, return_df=False, clean_icd10=True, grouping="HSMR"):
-        """ Computes the CCS codes for the patients' ICD-10 diagnoses
+        """ Computes the CCS codes for the patients' ICD-10 diagnoses 
         :param clean_icd10: Whether to standardise the ICD-10 codes first. REQUIRED if it has not already been done.
-        :param grouping: CCS sub-grouping scheme to use. Must be one of ['SHMI', 'HSMR', None].
+        :param grouping: CCS sub-grouping scheme to use. Must be one of ['SHMI', 'HSMR', None]. 
         :returns: New SalfordData instance with the CCS in place of the ICD-10
             if return_df: pd.DataFrame instance with the cleaned entries
         :raises ValueError: If the $grouping value is invalid.
@@ -341,16 +333,17 @@ class SalfordData(pd.DataFrame):
                     self.derive_readmission(return_series=True),
                     # self.derive_readmission_band(return_series=True),
                     self.derive_sdec(return_series=True),
-                    self.derive_ae_diagnosis_stems(return_series=True),
+                    #self.derive_ae_diagnosis_stems(return_series=True),
                     self.derive_charlson_index(return_series=True),
                 ],
                 axis=1,
             )
         )
 
-    def to_text(self, columns=None, target_col='CriticalEvent', inplace=True):
+    def to_text(self, columns=None, target_col='CriticalEvent', column_name=False, inplace=True):
         """ Convert the given columns to a single text string for passing to an NLP model
         :columns: List of column names to be converted to a string. If None, convert all but the target column
+        :column_name: bool, if True prepend column name before value in text
         :target_col: str of the column to be used as the label
         :return: SalfordData instance with one text column and one label column
             if inplace: Reference to the existing, altered SalfordData instance
@@ -369,7 +362,7 @@ class SalfordData(pd.DataFrame):
         # Drop patientnumber if still in df at this stage (though it shouldn't be, this is just a fail safe)
         df = df.drop('PatientNumber', axis=1, errors='ignore')
 
-        df['text'] = df.apply(row_to_text, axis=1)
+        df['text'] = df.apply(lambda x: row_to_text(x, column_name), axis=1)
         df = df.drop(columns, axis=1, errors='ignore')
 
         # Use HuggingFace standard here, just for ease of use later on
@@ -378,15 +371,28 @@ class SalfordData(pd.DataFrame):
         return df
 
     def convert_str_to_categorical(self, columns=None, inplace=True):
-        """ Transforms all string columns into categorical types 
+        """ Transforms all string columns into categorical types. Obs_AVCPU and Obs_Pain are ordinal (ordered categorical)
         :columns: List of columns to convert. If empty, selects all string/object type columns
         :returns SalfordData instance with the columns altered 
             if inplace: Reference to the existing, altered SalfordData instance
         """
         df = self if inplace else self.copy()
 
-        selection = df[columns] if columns else df.select_dtypes("object")
-        df[selection.columns] = selection.astype("category")
+        # AVCPU
+        # Convert to ordinal categorical
+        avcpu = list(set(SalfordTimeseries["Obs_AVCPU"]).intersection(df.columns))
+        category = pd.CategoricalDtype(AVCPU_Ordered_Scale, ordered=True)
+        df[avcpu] = df[avcpu].apply(lambda s: s.astype(category))
+
+        # Pain
+        # Convert to ordinal categorical
+        pain = list(set(SalfordTimeseries["Obs_Pain"]).intersection(df.columns))
+        category = pd.CategoricalDtype(Pain_Ordered_Scale, ordered=True)
+        df[pain] = df[pain].apply(lambda s: s.astype(category))
+
+        # Rest
+        columns = columns or df.select_dtypes("object").columns
+        df[columns] = df[columns].astype("category")
 
         return df
 
@@ -416,6 +422,9 @@ class SalfordData(pd.DataFrame):
         df = df[~(df.PatientNumber.isna() | df.Age.isna())].copy()
         df.Age = df.Age.astype(int)
         df.PatientNumber = df.PatientNumber.astype(int)
+
+        # Filter patients under 16
+        df = df[df.Age >= 16].copy()
 
         # Convert the following columns to bool
         binarize = [
@@ -522,7 +531,96 @@ class SalfordData(pd.DataFrame):
             inplace=True,
         )
 
-        return cls(df).clean_icd10()
+        # Strip all string columns
+        columns = df.select_dtypes("object").columns
+        df[columns] = df[columns].apply(lambda s: s.str.strip())
+
+        return cls(df).clean_icd10().clean_obs()
+
+    def clean_icd10(self, return_df=False):
+        """ Standardises the ICD-10 diagnosis entries to match the lookup table
+        :returns: New SalfordData instance with the entries altered
+            if return_df: pd.DataFrame instance with the cleaned entries
+        """
+        df = ICD10Table.fuzzy_match(self.Diagnoses)
+
+        return self._finalize_derived_feature_wide(
+            df, SalfordFeatures.Diagnoses, return_df
+        )
+
+    def clean_obs(self, return_df=False):
+        """ Prepares the manually transcriped clinical obs features
+        :returns: New SalfordData instance with the entries altered
+            if return_df: pd.DataFrame instance with the cleaned entries
+        """
+        df = self[SalfordFeatures.Obs].copy() if return_df else self
+
+        # Respiratory Rate
+        # Invert negatives, divide triple digit values by 10, clip to 5-80 BPM
+        columns = df[SalfordTimeseries["Obs_RespiratoryRate"]]
+        columns.apply(Series.invert_negatives).apply(
+            Series.shift_triple_digit_values
+        ).apply(Series.apply_clip_sentinel(5, 80))
+
+        # Breathing Device
+        # Clean up strings and keep the top 16 most frequent values (99% of total)
+        columns = SalfordTimeseries["Obs_BreathingDevice"]
+        df[columns] = df[columns].apply(
+            lambda s: Series.topn_freq_values(
+                s.str.upper()
+                    .str.replace("OTHER;", "")
+                    .str.strip()
+                    .str.split(";")
+                    .str[0],
+                n=16,
+            )
+        )
+
+        # O2 Sats
+        # Invert negatives, multiply single digits by 10, clip to 0-100%, clip outliers <= mean-3*std
+        columns = df[SalfordTimeseries["Obs_O2Sats"]]
+        columns.apply(Series.invert_negatives).apply(
+            Series.shift_single_digit_values
+        ).apply(Series.apply_clip_sentinel(0, 100))
+        columns.apply(
+            Series.apply_clip_sentinel(
+                columns.stack().mean() - 3 * columns.stack().std(), 100
+            )
+        )
+
+        # Temperature
+        # Invert negatives, clip to 25-45 degrees C
+        columns = df[SalfordTimeseries["Obs_Temperature"]]
+        columns.apply(Series.invert_negatives).apply(Series.apply_clip_sentinel(25, 45))
+
+        # Blood Pressure
+        # Clip diastolic to 20-200 mmHg
+        columns_dia = df[SalfordTimeseries["Obs_DiastolicBP"]]
+        columns_dia.apply(Series.apply_clip_sentinel(20, 200))
+
+        # Clip systolic to 40-300 mmHg, clip outliers <= diastolic+5
+        columns_sys = df[SalfordTimeseries["Obs_SystolicBP"]]
+        columns_sys.apply(Series.apply_clip_sentinel(40, 300))
+        df[columns_sys.columns] = columns_sys.mask(
+            columns_sys.le(columns_dia.values + 5), np.nan,
+        )
+
+        # Heart Rate
+        # Invert negatives, clip to 25-300 BPM
+        columns = df[SalfordTimeseries["Obs_Temperature"]]
+        columns.apply(Series.invert_negatives).apply(
+            Series.apply_clip_sentinel(25, 300)
+        )
+
+        # Nausea & Vomiting
+        # Convert to boolean
+        columns = SalfordTimeseries["Obs_Nausea"]
+        df[columns] = df[columns].__eq__("1 - Nausea present")
+
+        columns = SalfordTimeseries["Obs_Vomiting"]
+        df[columns] = df[columns].__eq__("1 - Vomiting since last round")
+
+        return df
 
 
 SalfordFeatures = DotDict(
@@ -583,12 +681,6 @@ SalfordFeatures = DotDict(
         for col in cols
         if str(parent).startswith("Blood_")
     ],
-    AdmissionBlood=[
-        col
-        for parent, cols in SalfordTimeseries.items()
-        for col in cols
-        if str(parent).startswith("Blood_") and str(col).endswith("_Admission")
-    ],
     VBG=[
         col
         for parent, cols in SalfordTimeseries.items()
@@ -601,11 +693,11 @@ SalfordFeatures = DotDict(
         for col in cols
         if str(parent).startswith("NEWS_")
     ],
-    AdmissionNEWS=[
+    Obs=[
         col
         for parent, cols in SalfordTimeseries.items()
         for col in cols
-        if str(parent).startswith("NEWS_") and str(col).endswith("_Admission")
+        if str(parent).startswith("Obs_")
     ],
     CompositeScores=["CFS_Score", "Waterlow_Score", "Waterlow_Outcome"],
 )
@@ -614,4 +706,5 @@ SalfordFeatures["TimeSeries"] = dict(
     NEWS=SalfordFeatures["NEWS"],
     Blood=SalfordFeatures["Blood"],
     VBG=SalfordFeatures["VBG"],
+    Obs=SalfordFeatures["Obs"],
 )
