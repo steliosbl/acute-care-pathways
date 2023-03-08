@@ -6,13 +6,13 @@ import torch
 import os
 
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer
-from datasets import Dataset
+from datasets import Dataset, interleave_datasets
 import evaluate
 
 from salford_datasets.salford import SalfordData, SalfordFeatures
 from acd_experiment.sci import SCIData, SCICols
 from acd_experiment.salford_adapter import SalfordAdapter
-from .whole_nlp import compute_metric
+from .whole_nlp import compute_metric, CustomTrainer
 
 
 def main():
@@ -25,6 +25,10 @@ def main():
     parser.add_argument('--text-features', choices=['triage', 'triage_diagnosis', 'triage_complaint'],
                         default='triage', help='The combination of text features to include')
     parser.add_argument('--demographics', action='store_true', help='Include (text-encoded) patient demographics')
+    parser.add_argument("--sampling", help="Use under/oversampling", choices=['under', 'over', None], default=None)
+    parser.add_argument("--column-name", help="Prepend column name before value in text representation",
+                        action="store_true")
+
 
     parser.add_argument('--model-name', type=str,
                         default='ml4pubmed/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext_pub_section',
@@ -54,7 +58,7 @@ def main():
     # Derive the required CriticalEvent
     dataset = dataset.derive_critical_event(wards=["CCU", "HH1M"], ignore_admit_ward=False)
 
-    dataset = dataset.to_text(columns=columns)
+    dataset = dataset.to_text(columns=columns, column_name=args.column_name)
 
     # Get model, tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=True, device=0)
@@ -73,6 +77,15 @@ def main():
     # Split into train test splits
     encoded_dataset = encoded_dataset.train_test_split(test_size=0.2, shuffle=True, stratify_by_column='label')
 
+    if args.sampling:
+        stopping_strat = "all_exhausted" if args.sampling == 'over' else "first_exhausted"
+        probs = [0.4, 0.6] if args.sampling == "over" else [0.5, 0.5]
+        encoded_dataset_neg = encoded_dataset['train'].filter(lambda x: x['label'] == 0)
+        encoded_dataset_pos = encoded_dataset['train'].filter(lambda x: x['label'] == 1)
+
+        encoded_dataset['train'] = interleave_datasets([encoded_dataset_neg, encoded_dataset_pos], probabilities=probs,
+                                                       stopping_strategy=stopping_strat)
+
     # Set up training
     training_args = TrainingArguments(
         f"{args.model_name}-finetuned-salford-textonly-{args.text_features}",
@@ -89,14 +102,24 @@ def main():
         report_to='tensorboard'
     )
 
-    trainer = Trainer(
-        model,
-        training_args,
-        train_dataset=encoded_dataset['train'],
-        eval_dataset=encoded_dataset['test'],
-        tokenizer=tokenizer,
-        compute_metrics=compute_metric
-    )
+    if args.sampling:
+        trainer = Trainer(
+            model,
+            training_args,
+            train_dataset=encoded_dataset['train'],
+            eval_dataset=encoded_dataset['test'],
+            tokenizer=tokenizer,
+            compute_metrics=compute_metric
+        )
+    else:
+        trainer = CustomTrainer(
+            model,
+            training_args,
+            train_dataset=encoded_dataset['train'],
+            eval_dataset=encoded_dataset['test'],
+            tokenizer=tokenizer,
+            compute_metrics=compute_metric
+        )
 
     trainer.train()
 
