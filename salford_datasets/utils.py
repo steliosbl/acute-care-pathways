@@ -43,7 +43,6 @@ def justify(df, invalid_val=np.nan, axis=1, side="left"):
 
     return pd.DataFrame(out, columns=df.columns, index=df.index)
 
-
 class Series:
     @staticmethod
     def topn_freq_values(s, n=10, sentinel=np.nan):

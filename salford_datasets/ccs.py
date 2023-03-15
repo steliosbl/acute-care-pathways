@@ -83,5 +83,30 @@ class CCSTable:
             hsmr = pd.read_hdf(cls.FILENAME, cls.HSMR_KEY)
         
         return cls._regroup(df, hsmr, 'AggregateGroup', 'HSMR')
+
+    @classmethod
+    def ccs_description_lookup(cls, ccs=None):
+        """ Produces a lookup dictionary of the full string descriptions of CCS codes
+        :returns: Dictionary of CCS group descriptions
+        """
+        if ccs is None:
+            ccs = pd.read_hdf(cls.FILENAME, cls.CCS_KEY)
+        return ccs.set_index('CCSGroup').CCSGroupDescription.to_dict()
     
-    
+    @classmethod
+    def hsmr_description_lookup(cls, hsmr=None):
+        """ Produces a lookup dictionary of the full string descriptions of HSMR codes
+        :returns: Dictionary of HSMR aggregate group descriptions
+        """
+        if hsmr is None:
+            hsmr = pd.read_hdf(cls.FILENAME, cls.HSMR_KEY)
+        return hsmr.AggregateGroupDescription.to_dict()
+
+    @classmethod
+    def shmi_description_lookup(cls, shmi=None):
+        """ Produces a lookup dictionary of the full string descriptions of SHMI codes
+        :returns: Dictionary of SHMI aggregate group descriptions
+        """
+        if shmi is None:
+            shmi = pd.read_hdf(cls.FILENAME, cls.SHMI_KEY)
+        return shmi.SHMIGroupDescription.to_dict()

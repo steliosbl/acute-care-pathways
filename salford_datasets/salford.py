@@ -322,6 +322,47 @@ class SalfordData(pd.DataFrame):
             df, SalfordFeatures.Diagnoses, return_df
         )
 
+    def expand_icd10_definitions(self, clean_icd10=True, return_df=False):
+        """ Converts the ICD-10 diagnosis entries full description strings
+        :param clean_icd10: Whether to standardise the ICD-10 codes first
+        :returns: New SalfordData instance with the entries altered
+            if return_df: pd.DataFrame instance with the cleaned entries
+        """
+        diagnoses = self.clean_icd10(return_df=True) if clean_icd10 else self.Diagnoses
+
+        df = diagnoses.applymap(ICD10Table.code_description_lookup().get)
+
+        return self._finalize_derived_feature_wide(
+            df, SalfordFeatures.Diagnoses, return_df
+        )
+
+    def expand_ccs_definitions(self, derive_ccs=True, grouping="HSMR", return_df=False):
+        """ Converts the the CCS codes for the patients' ICD-10 diagnoses into description strings
+        :param derive_ccs: Whether to group the ICD-10 codes first. REQUIRED if it has not already been done.
+        :param grouping: CCS sub-grouping scheme to use. Must be one of ['SHMI', 'HSMR', None]. 
+        :returns: New SalfordData instance with the CCS in place of the ICD-10
+            if return_df: pd.DataFrame instance with the cleaned entries
+        :raises ValueError: If the $grouping value is invalid.
+        """
+        diagnoses = (
+            self.derive_ccs(grouping=grouping, return_df=True)
+            if derive_ccs
+            else self.Diagnoses
+        )
+
+        if grouping is None:
+            df = diagnoses.applymap(CCSTable.ccs_description_lookup().get)
+        elif grouping == "SHMI":
+            df = diagnoses.applymap(CCSTable.shmi_description_lookup().get)
+        elif grouping == "HSMR":
+            df = diagnoses.applymap(CCSTable.hsmr_description_lookup().get)
+        else:
+            raise ValueError('The `grouping` must be one of "SHMI", "HSMR", or None.')
+
+        return self._finalize_derived_feature_wide(
+            df, SalfordFeatures.Diagnoses, return_df
+        )
+
     def augment_derive_all(self, within=1):
         return SalfordData(
             pd.concat(
@@ -568,10 +609,10 @@ class SalfordData(pd.DataFrame):
         df[columns] = df[columns].apply(
             lambda s: Series.topn_freq_values(
                 s.str.upper()
-                    .str.replace("OTHER;", "")
-                    .str.strip()
-                    .str.split(";")
-                    .str[0],
+                .str.replace("OTHER;", "")
+                .str.strip()
+                .str.split(";")
+                .str[0],
                 n=16,
             )
         )
