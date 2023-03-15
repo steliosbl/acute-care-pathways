@@ -44,3 +44,10 @@ class ICD10Table:
         result.index=r.index
 
         return r
+
+    @classmethod
+    def code_description_lookup(cls):
+        """ Produces a lookup dictionary of the full string descriptions of ICD-10 codes
+        :returns: Dictionary of ICD-10 code descriptions
+        """
+        return pd.read_hdf(cls.FILENAME, cls.KEY).WHO_Full_Desc.to_dict()

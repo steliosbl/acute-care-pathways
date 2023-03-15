@@ -2,7 +2,7 @@ from acd_experiment.systematic_comparison import construct_parser, run_experimen
 from acd_experiment.sci import SCIData, SCICols
 
 from acd_experiment.salford_adapter import SalfordAdapter
-from datasets.salford import SalfordData
+from salford_datasets.salford import SalfordData
 import pandas as pd
 import numpy as np
 
