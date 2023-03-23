@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import json
+import re
 
 from .salford_raw import (
     SalfordTimeseries,
@@ -32,7 +33,7 @@ class SalfordData(pd.DataFrame):
             raise
 
     def _finalize_derived_feature(self, series, col_name, return_series):
-        """ Given a derived feature in pd.Series form, 
+        """ Given a derived feature in pd.Series form,
         concatenates it to the dataset under $col_name$ or reindexes to match the dataset """
 
         if return_series:
@@ -167,8 +168,8 @@ class SalfordData(pd.DataFrame):
     def derive_readmission(
         self, within=30, col_name="Readmission", return_series=False
     ):
-        """ Determines whether each record is a readmission, 
-        i.e. the same patient appeared in a previous record (chronologically) within the specified time window 
+        """ Determines whether each record is a readmission,
+        i.e. the same patient appeared in a previous record (chronologically) within the specified time window
         :param within: Maximum time between last discharge and latest admission to consider a readmission
         :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
@@ -186,7 +187,7 @@ class SalfordData(pd.DataFrame):
         col_name="ReadmissionBand",
         return_series=False,
     ):
-        """ Bins all readmissions (re-appearances of patients) depending on the elapsed time between the last discharge and latest admission 
+        """ Bins all readmissions (re-appearances of patients) depending on the elapsed time between the last discharge and latest admission
         :param within: Maximum time between last discharge and latest admission to consider a readmission
         :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
@@ -205,7 +206,7 @@ class SalfordData(pd.DataFrame):
     def derive_sdec(
         self, sdec_wards=["AEC", "AAA"], col_name="SentToSDEC", return_series=False
     ):
-        """ Determines whether the patient originally was admitted to SDEC 
+        """ Determines whether the patient originally was admitted to SDEC
         :param sdec_wards: The wards to search for. By default, ['AEC', 'AAA']
         :returns: New SalfordData instance with the new features added
             if return_series: pd.Series instance of the new feature
@@ -300,9 +301,9 @@ class SalfordData(pd.DataFrame):
         )
 
     def derive_ccs(self, return_df=False, clean_icd10=True, grouping="HSMR"):
-        """ Computes the CCS codes for the patients' ICD-10 diagnoses 
+        """ Computes the CCS codes for the patients' ICD-10 diagnoses
         :param clean_icd10: Whether to standardise the ICD-10 codes first. REQUIRED if it has not already been done.
-        :param grouping: CCS sub-grouping scheme to use. Must be one of ['SHMI', 'HSMR', None]. 
+        :param grouping: CCS sub-grouping scheme to use. Must be one of ['SHMI', 'HSMR', None].
         :returns: New SalfordData instance with the CCS in place of the ICD-10
             if return_df: pd.DataFrame instance with the cleaned entries
         :raises ValueError: If the $grouping value is invalid.
@@ -339,7 +340,7 @@ class SalfordData(pd.DataFrame):
     def expand_ccs_definitions(self, derive_ccs=True, grouping="HSMR", return_df=False):
         """ Converts the the CCS codes for the patients' ICD-10 diagnoses into description strings
         :param derive_ccs: Whether to group the ICD-10 codes first. REQUIRED if it has not already been done.
-        :param grouping: CCS sub-grouping scheme to use. Must be one of ['SHMI', 'HSMR', None]. 
+        :param grouping: CCS sub-grouping scheme to use. Must be one of ['SHMI', 'HSMR', None].
         :returns: New SalfordData instance with the CCS in place of the ICD-10
             if return_df: pd.DataFrame instance with the cleaned entries
         :raises ValueError: If the $grouping value is invalid.
@@ -367,7 +368,8 @@ class SalfordData(pd.DataFrame):
         return SalfordData(
             pd.concat(
                 [
-                    self.drop("AE_MainDiagnosis", axis=1),
+                    self,
+                    #self.drop("AE_MainDiagnosis", axis=1),
                     self.derive_mortality(within=within, return_series=True),
                     self.derive_critical_care(within=within, return_series=True),
                     self.derive_critical_event(within=within, return_series=True),
@@ -381,11 +383,12 @@ class SalfordData(pd.DataFrame):
             )
         )
 
-    def to_text(self, columns=None, target_col='CriticalEvent', column_name=False, inplace=True):
+    def to_text(self, columns=None, target_col='CriticalEvent', column_name=False, sep_token=' [SEP] ', inplace=True):
         """ Convert the given columns to a single text string for passing to an NLP model
         :columns: List of column names to be converted to a string. If None, convert all but the target column
         :column_name: bool, if True prepend column name before value in text
         :target_col: str of the column to be used as the label
+        :sep_token: str, sep token
         :return: SalfordData instance with one text column and one label column
             if inplace: Reference to the existing, altered SalfordData instance
         """
@@ -394,7 +397,8 @@ class SalfordData(pd.DataFrame):
         if not columns:
             columns = list(df.columns)
 
-        columns.append(target_col)
+        if target_col not in columns:
+            columns.append(target_col)
 
         df = df[columns]
         Y = df[target_col]
@@ -403,18 +407,62 @@ class SalfordData(pd.DataFrame):
         # Drop patientnumber if still in df at this stage (though it shouldn't be, this is just a fail safe)
         df = df.drop('PatientNumber', axis=1, errors='ignore')
 
-        df['text'] = df.apply(lambda x: row_to_text(x, column_name), axis=1)
+        df['text'] = df.apply(lambda x: row_to_text(x, column_name, sep_token), axis=1)
         df = df.drop(columns, axis=1, errors='ignore')
 
         # Use HuggingFace standard here, just for ease of use later on
-        df['label'] = Y
+        try:
+            df['label'] = Y
+        except KeyError:
+            df['label'] = Y['CriticalEvent']
 
+        return df
+
+    def load_text_embeddings(self, embeddings_path, inplace=True):
+        """
+        Load pre-computed text embeddings (for any set of the text features, e.g. AE_TriageNote only) into the dataset
+        :param embeddings_path: str, path to the pre-computed data as an HDF5 file
+        :param inplace: bool, if True reference existing SalfordData object
+        :return: SalfordData instance with the embeddings added
+        """
+        df = self if inplace else self.copy()
+
+        embeddings_df = pd.read_hdf(embeddings_path, 'embeddings')
+        df = pd.merge(df, embeddings_df, how='inner', left_on='SpellSerial', right_on='SpellSerial')
+
+        return df
+
+    def group_ethnicity(self, threshold=200, return_series=False):
+        """ Group ethnicities with fewer than X into an "other" group
+        :param threshold: int, number of samples to replace
+        :return: New SalfordData instance with the new grouping in place of the old ethnicity column
+            if return_series: pd.Series instance of the new grouping
+        """
+        ethnicity = self['Ethnicity']
+
+        ethnicity = ethnicity.mask(ethnicity.map(ethnicity.value_counts()) < threshold, 'OTHER')
+
+        return self._finalize_derived_feature(ethnicity, "Ethnicity", return_series)
+
+    def rename_columns(self, inplace=True):
+        """ Simple column renaming to make columns names more useful for text models
+        :return: SalfordData instance with the column names altered
+            if inplace: Reference to the existing, altered SalfordData instance
+        """
+        df = self if inplace else self.copy()
+
+        column_renaming = {
+            c: re.sub(' +', ' ', re.sub('([A-Z][a-z]+)', r' \1', re.sub('([A-Z]+)', r' \1', c))).replace('_', ' ') for c
+            in df.columns
+        }
+
+        df = df.rename(columns=column_renaming)
         return df
 
     def convert_str_to_categorical(self, columns=None, inplace=True):
         """ Transforms all string columns into categorical types. Obs_AVCPU and Obs_Pain are ordinal (ordered categorical)
         :columns: List of columns to convert. If empty, selects all string/object type columns
-        :returns SalfordData instance with the columns altered 
+        :returns SalfordData instance with the columns altered
             if inplace: Reference to the existing, altered SalfordData instance
         """
         df = self if inplace else self.copy()
@@ -609,10 +657,10 @@ class SalfordData(pd.DataFrame):
         df[columns] = df[columns].apply(
             lambda s: Series.topn_freq_values(
                 s.str.upper()
-                .str.replace("OTHER;", "")
-                .str.strip()
-                .str.split(";")
-                .str[0],
+                    .str.replace("OTHER;", "")
+                    .str.strip()
+                    .str.split(";")
+                    .str[0],
                 n=16,
             )
         )
