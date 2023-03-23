@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import os
 
+from sklearn.impute import SimpleImputer
+
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer
 from datasets import Dataset, interleave_datasets
 import evaluate
@@ -15,7 +17,8 @@ from acd_experiment.sci import SCIData, SCICols
 from acd_experiment.salford_adapter import SalfordAdapter
 
 
-def get_text_dataset(data_path, select_features, outcome, old_only=False, old_data_path=None, column_name=False):
+def get_text_dataset(data_path, select_features, outcome, old_only=False, old_data_path=None, column_name=False,
+                     impute=False):
     """ Load SalfordData and convert tabular data to a single text string
     :param data_path: str, path to Salford HDF5 file
     :param select_features: Type of features to use
@@ -23,11 +26,12 @@ def get_text_dataset(data_path, select_features, outcome, old_only=False, old_da
     :param old_only: if True, use only records present in original data
     :param old_data_path: Path to the original data, must be passed if old_only is True
     :param column_name: if True, prepend column name before value in text representation
+    :param impute: if True, replace missing values with median
     :return SalfordData:
     """
     dataset = SalfordData.from_raw(pd.read_hdf(data_path, key='table'))
-    dataset = SalfordData(dataset[dataset['Age'] >= 18])
-    dataset = dataset.augment_derive_all()
+    dataset = SalfordData(dataset[dataset['Age'] >= 18]).augment_derive_all()
+
     if old_only:
         print("----- Using only patients in both datasets")
         # Get original data
@@ -37,21 +41,24 @@ def get_text_dataset(data_path, select_features, outcome, old_only=False, old_da
                     "AdmissionDateTime"
                 )
             )
-                .mandate(SCICols.news_data_raw)
-                .derive_ae_diagnosis_stems(onehot=False)
+            .mandate(SCICols.news_data_raw)
+            .derive_ae_diagnosis_stems(onehot=False)
         )
 
         dataset = SalfordAdapter(dataset.loc[np.intersect1d(dataset.index, scii.SpellSerial)])
+
     # Get the columns to keep
     # TODO: Is there a better way to do this with SalfordFeatures?
-    scores_with_notes_labs_and_hospital = ['NEWS_RespiratoryRate_Admission', 'NEWS_O2Sat_Admission',
-                                           'NEWS_Temperature_Admission', 'NEWS_BP_Admission',
-                                           'NEWS_HeartRate_Admission', 'NEWS_AVCPU_Admission',
-                                           'NEWS_BreathingDevice_Admission', 'Female', 'Age',
-                                           'Blood_Haemoglobin_Admission', 'Blood_Urea_Admission',
+    scores_with_notes_labs_and_hospital = ['Obs_RespiratoryRate_Admission', 'Obs_BreathingDevice_Admission',
+                                           'Obs_O2Sats_Admission', 'Obs_Temperature_Admission',
+                                           'Obs_SystolicBP_Admission', 'Obs_DiastolicBP_Admission',
+                                           'Obs_HeartRate_Admission', 'Obs_AVCPU_Admission',
+                                           'Obs_Pain_Admission', 'Obs_Nausea_Admission', 'Obs_Vomiting_Admission',
+                                           'Female', 'Age', 'Blood_Haemoglobin_Admission', 'Blood_Urea_Admission',
                                            'Blood_Sodium_Admission', 'Blood_Potassium_Admission',
-                                           'Blood_Creatinine_Admission', 'AE_PresentingComplaint', 'AE_MainDiagnosis',
-                                           'SentToSDEC', 'Readmission', 'AdmitMethod', 'AdmissionSpecialty']
+                                           'Blood_Creatinine_Admission', 'AE_PresentingComplaint',
+                                           'AE_MainDiagnosis', 'SentToSDEC', 'Readmission', 'AdmitMethod',
+                                           'AdmissionSpecialty']
     new_features = ['Blood_DDimer_Admission', 'Blood_CRP_Admission', 'Blood_Albumin_Admission',
                     'Blood_WhiteCount_Admission', 'Waterlow_Score', 'CFS_Score', 'CharlsonIndex']
     if select_features == 'sci':
@@ -62,20 +69,44 @@ def get_text_dataset(data_path, select_features, outcome, old_only=False, old_da
         columns = scores_with_notes_labs_and_hospital + new_features
     elif select_features == 'new_no_adm':
         columns = scores_with_notes_labs_and_hospital[:-1] + new_features
+    elif select_features == 'new_triagenotes':
+        columns = scores_with_notes_labs_and_hospital + new_features
+    elif select_features == 'sci_triagenotes':
+        columns = scores_with_notes_labs_and_hospital
+    elif select_features == 'new_diag':
+        columns = scores_with_notes_labs_and_hospital + new_features + SalfordFeatures.Diagnoses
+        dataset = dataset.expand_icd10_definitions()
     else:
         columns = None
 
-    # Derive the required CriticalEvent
+    # Derive the required CriticalEvent (if los, this isn't needed)
+    outcome_col = "CriticalEvent"
     if outcome == 'strict':
         dataset = dataset.derive_critical_event(wards=["CCU"], ignore_admit_ward=True)
     elif outcome == 'h1':
         dataset = dataset.derive_critical_event(wards=["CCU", "HH1M"], ignore_admit_ward=True)
     elif outcome == 'direct':
         dataset = dataset.derive_critical_event(wards=["CCU"], ignore_admit_ward=False)
-    else:
+    elif outcome == 'sci':
         dataset = dataset.derive_critical_event(wards=["CCU", "HH1M"], ignore_admit_ward=False)
+    elif outcome == 'los':
+        outcome_col = 'LOSBand'
+    elif outcome == 'readm':
+        outcome_col = 'Readmission'
 
-    dataset = dataset.to_text(columns=columns, column_name=column_name)
+    if impute:
+        number_columns = dataset.select_dtypes(include=[float, int]).columns
+
+        imp = SimpleImputer(strategy='median', missing_values=np.nan)
+        dataset[number_columns] = imp.fit_transform(dataset[number_columns])
+
+    if '_triagenotes' in select_features:
+        # Separate TriageNote from tabular data with [SEP], then commas for tabular columns
+        text_series = dataset.to_text(['AE_TriageNote'], column_name=column_name, inplace=False)['text']
+        dataset = dataset.to_text(columns, column_name=column_name, target_col=outcome_col, sep_token=', ')
+        dataset['text'] = text_series + dataset['text']
+    else:
+        dataset = dataset.to_text(columns=columns, column_name=column_name, target_col=outcome_col, sep_token=', ')
 
     return dataset
 
@@ -86,15 +117,23 @@ class CustomTrainer(Trainer):
         # forward pass
         outputs = model(**inputs)
         logits = outputs.get("logits")
-        # compute custom loss (suppose one has 3 labels with different weights)
+        # compute custom loss
         loss_fct = nn.CrossEntropyLoss(weight=torch.tensor([0.5026853973129243, 93.59609375]).cuda())
         loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
         return (loss, outputs) if return_outputs else loss
 
 
+def compute_metric(eval_pred, metrics=None):
+    """ Compute given metrics given outputs from a HF model
+    :param eval_pred: Output from a HF model
+    :param metrics: List[str] of metrics to compute, if None use a set of defaults for binary classification
+    :return: metrics
+    """
 
-def compute_metric(eval_pred):
-    metric = evaluate.combine(["accuracy", "f1", "precision", "recall"])
+    if metrics is None:
+        metrics = ["accuracy", "f1", "precision", "recall"]
+
+    metric = evaluate.combine(metrics)
     predictions, labels = eval_pred
     predictions = np.argmax(predictions, 1)
 
@@ -110,13 +149,15 @@ def main():
     parser.add_argument('--data-path', type=str, help='Path to the raw dataset HDF5 file', required=True)
     parser.add_argument("--old-data-path", type=str, help="Path to the old dataset HDF5")
     parser.add_argument("--select-features", help="Limit feature groups",
-                        choices=['all', 'sci', 'sci_no_adm', 'new', 'new_no_adm'], default='all')
+                        choices=['all', 'sci', 'sci_no_adm', 'new', 'new_no_adm', 'new_triagenotes', 'sci_triagenotes',
+                                 'new_diag', 'sci_diag'], default='all')
     parser.add_argument("--outcome", help="Outcome to predict", choices=['strict', 'h1', 'direct', 'sci'],
                         default='sci')
     parser.add_argument("--old-only", help="Use only patients in the original dataset", action="store_true")
     parser.add_argument("--sampling", help="Use under/oversampling", choices=['under', 'over', None], default=None)
     parser.add_argument("--column-name", help="Prepend column name before value in text representation",
                         action="store_true")
+    parser.add_argument("--impute", action="store_true", help="Impute missing data")
 
     parser.add_argument('--model-name', type=str,
                         default='ml4pubmed/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext_pub_section',
@@ -129,12 +170,13 @@ def main():
     args = parser.parse_args()
 
     dataset = get_text_dataset(args.data_path, args.select_features, args.outcome, args.old_only, args.old_data_path,
-                               args.column_name)
+                               args.column_name, args.impute)
+    num_labels = len(dataset['label'].unique())
 
     # Get model, tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=True, device=0)
     model = AutoModelForSequenceClassification.from_pretrained(args.model_name, output_hidden_states=False,
-                                                                num_labels=2, ignore_mismatched_sizes=True)
+                                                               num_labels=num_labels, ignore_mismatched_sizes=True)
 
     # Tokenize the text
     encoded_dataset = Dataset.from_pandas(dataset)
