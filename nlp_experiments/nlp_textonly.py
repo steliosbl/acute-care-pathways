@@ -15,6 +15,58 @@ from acd_experiment.salford_adapter import SalfordAdapter
 from .whole_nlp import compute_metric, CustomTrainer
 
 
+def get_textonly_dataset(data_path, target, text_features, demographics=True, column_name=True):
+    """
+    Load SalfordDataset with deired text features
+    :param data_path: str, Path to HDF5 file
+    :param target: str, Chosen target variable. Must be one of ["CriticalEvent", "Ethnicity", "SentToSDEC", "LOSBand",
+    "Readmission"]
+    :param text_features: str, Features to get. Must be one of ['triage', 'triage_diagnosis', 'triage_complaint']
+    :param demographics: bool, If True append patient demographics as text
+    :param column_name: bool, If True prepend column names before each value
+    :return: pd.DataFrame of desired features, str of the metric to use when choosing the best model,
+    int of number of distinct labels in the dataset
+    """
+    dataset = SalfordData.from_raw(pd.read_hdf(data_path, key='table'))
+    dataset = dataset.augment_derive_all()
+
+    # If doing binary classification, we can use the default metrics
+    metrics = None
+    best_metric = 'f1'
+    num_labels = 2
+    if target in ["Ethnicity", "LOSBand"]:
+        dataset.group_ethnicity(5)
+        metrics = ['accuracy']
+        best_metric = metrics[0]
+        num_labels = len(dataset[target].unique())
+    elif target == "CriticalEvent":
+        dataset = dataset.derive_critical_event(wards=["CCU", "HH1M"], ignore_admit_ward=False)
+
+    # Get the columns to keep
+    if text_features == 'triage':
+        columns = ['AE_TriageNote']
+    elif text_features == 'triage_diagnosis':
+        columns = ['AE_TriageNote', 'AE_MainDiagnosis']
+    else:
+        columns = ['AE_TriageNote', 'AE_PresentingComplaint']
+
+    if demographics:
+        demo_cols = SalfordFeatures.Demographics
+
+        # Don't include ethnicity if that's our target
+        if target == "Ethnicity":
+            demo_cols.remove("Ethnicity")
+
+        # Convert to text in this format: FREETEXT [SEP] Column1: Data1, Column2: Data2 ...
+        text_series = dataset.to_text(columns, column_name=column_name, inplace=False)['text']
+        dataset = dataset.to_text(demo_cols, column_name=column_name, target_col=target, sep_token=', ')
+        dataset['text'] = text_series + dataset['text']
+    else:
+        dataset = dataset.to_text(columns=columns, column_name=column_name, target_col=target, sep_token=', ')
+
+    return dataset, best_metric, metrics, num_labels
+
+
 def main():
     """
     Run NLP classifiers on text fields only (+ maybe demographics)
@@ -28,7 +80,8 @@ def main():
     parser.add_argument("--sampling", help="Use under/oversampling", choices=['under', 'over', None], default=None)
     parser.add_argument("--column-name", help="Prepend column name before value in text representation",
                         action="store_true")
-
+    parser.add_argument("--target", choices=["CriticalEvent", "Ethnicity", "SentToSDEC", "LOSBand", "Readmission"],
+                        default="CriticalEvent", help="Target variable to predict")
 
     parser.add_argument('--model-name', type=str,
                         default='ml4pubmed/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext_pub_section',
@@ -40,30 +93,13 @@ def main():
 
     args = parser.parse_args()
 
-    dataset = SalfordData.from_raw(pd.read_hdf(args.data_path, key='table'))
-    dataset = SalfordData(dataset[dataset['Age'] >= 18])
-    dataset = dataset.augment_derive_all()
-
-    # Get the columns to keep
-    if args.text_features == 'triage':
-        columns = ['AE_TriageNote']
-    elif args.text_features == 'triage_diagnosis':
-        columns = ['AE_TriageNote', 'AE_MainDiagnosis']
-    else:
-        columns = ['AE_TriageNote', 'AE_PresentingComplaint']
-
-    if args.demographics:
-        columns += SalfordFeatures.Demographics
-
-    # Derive the required CriticalEvent
-    dataset = dataset.derive_critical_event(wards=["CCU", "HH1M"], ignore_admit_ward=False)
-
-    dataset = dataset.to_text(columns=columns, column_name=args.column_name)
+    dataset, best_metric, metrics, num_labels = get_textonly_dataset(args.data_path, args.target, args.text_features,
+                                                                     args.demographics, args.column_name)
 
     # Get model, tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=True, device=0)
     model = AutoModelForSequenceClassification.from_pretrained(args.model_name, output_hidden_states=False,
-                                                                num_labels=2, ignore_mismatched_sizes=True)
+                                                               num_labels=num_labels, ignore_mismatched_sizes=True)
 
     # Tokenize the text
     encoded_dataset = Dataset.from_pandas(dataset)
@@ -72,7 +108,7 @@ def main():
                                                               truncation=True, return_tensors='pt'),
                                           batched=True)
 
-    encoded_dataset = encoded_dataset.class_encode_column('label')
+    encoded_dataset = encoded_dataset.class_encode_column('label', include_nulls=True)
 
     # Split into train test splits
     encoded_dataset = encoded_dataset.train_test_split(test_size=0.2, shuffle=True, stratify_by_column='label')
@@ -97,19 +133,19 @@ def main():
         num_train_epochs=args.epochs,
         weight_decay=0.01,
         load_best_model_at_end=True,
-        metric_for_best_model='f1',
+        metric_for_best_model=best_metric,
         push_to_hub=False,
         report_to='tensorboard'
     )
 
-    if args.sampling:
+    if args.sampling or args.target != "CriticalEvent":
         trainer = Trainer(
             model,
             training_args,
             train_dataset=encoded_dataset['train'],
             eval_dataset=encoded_dataset['test'],
             tokenizer=tokenizer,
-            compute_metrics=compute_metric
+            compute_metrics=lambda x: compute_metric(x, metrics)
         )
     else:
         trainer = CustomTrainer(
