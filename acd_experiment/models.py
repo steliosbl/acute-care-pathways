@@ -158,7 +158,7 @@ class Estimator_XGBoost(Estimator):
 
     _requirements = dict(
         onehot=False,
-        ordinal=True,
+        ordinal=False,
         imputation=False,
         fillna=False,
         oneclass=False,
@@ -172,7 +172,7 @@ class Estimator_XGBoost(Estimator):
         n_jobs=1,
         objective="binary:logistic",
         booster="gbtree",
-        enable_categorical=False,
+        enable_categorical=True,
     )
 
     _tuning_params_default = dict(
@@ -307,10 +307,10 @@ class Estimator_LogisticRegression(Estimator):
     )
 
     _static_params = dict(
-        max_iter=2000, solver="lbfgs", random_state=42, penalty="none"
+        max_iter=5000, solver="lbfgs", random_state=42, penalty="none", C=1.0
     )
 
-    _tuning_params_default = dict(C=5.9, class_weight="balanced")
+    _tuning_params_default = dict(class_weight="balanced")
 
     _explainer = shap.LinearExplainer
     _explainer_args = dict(feature_perturbation="correlation_dependent")
@@ -330,7 +330,7 @@ class Estimator_LogisticRegression(Estimator):
 
 class Estimator_L1Regression(Estimator_LogisticRegression):
     _name = "L1Regression"
-    _static_params = dict(max_iter=2000, solver="saga", random_state=42, penalty="l1")
+    _static_params = dict(max_iter=5000, solver="saga", random_state=42, penalty="l1")
 
     @classmethod
     def suggest_parameters(cls, trial):
@@ -347,7 +347,7 @@ class Estimator_L1Regression(Estimator_LogisticRegression):
 class Estimator_ElasticNetRegression(Estimator_LogisticRegression):
     _name = "ElasticNetRegression"
     _static_params = dict(
-        max_iter=2000, solver="saga", random_state=42, penalty="elasticnet"
+        max_iter=5000, solver="saga", random_state=42, penalty="elasticnet"
     )
     _tuning_params_default = dict(C=5.9, l1_ratio=0.5, class_weight="balanced")
 
@@ -366,7 +366,7 @@ class Estimator_ElasticNetRegression(Estimator_LogisticRegression):
 
 class Estimator_L2Regression(Estimator_LogisticRegression):
     _name = "L2Regression"
-    _static_params = dict(max_iter=2000, solver="lbfgs", random_state=42, penalty="l2")
+    _static_params = dict(max_iter=5000, solver="lbfgs", random_state=42, penalty="l2")
 
     @classmethod
     def suggest_parameters(cls, trial):
@@ -531,7 +531,7 @@ class Estimator_LinearSVM(Estimator):
     )
 
     _static_params = dict(
-        max_iter=2000,
+        max_iter=5000,
         loss="hinge",
         random_state=42,
         penalty="l2",

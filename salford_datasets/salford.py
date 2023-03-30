@@ -28,7 +28,7 @@ class SalfordData(pd.DataFrame):
             return super().__getattr__(name)
         except AttributeError:
             if name in SalfordFeatures:
-                return self[SalfordFeatures[name]]
+                return SalfordData(self[SalfordFeatures[name]])
             raise
 
     def _finalize_derived_feature(self, series, col_name, return_series):
@@ -632,6 +632,59 @@ class SalfordData(pd.DataFrame):
 
         return df
 
+    def single_imputation_obs_and_news(self, return_df=False):
+        """ Quickly imputes the obs and NEWS scores
+        :returns: New SalfordData instance with the entries altered
+            if return_df: pd.DataFrame instance with the imputed entries
+        """
+        df = (
+            self[SalfordFeatures.Obs + SalfordFeatures.NEWS].copy()
+            if return_df
+            else self
+        )
+        # Start with the zero-fills: All the NEWS scores
+        static_fills = {_: 0 for _ in SalfordFeatures.NEWS}
+
+        # Next, the numericals: All the obs, except the categoricals and binaries
+        # Calling median with numeric_only=True removes the categoricals for us but not the binaries
+        static_fills |= df[SalfordFeatures.Obs].median(numeric_only=True).to_dict()
+
+        # Finally, the categoricals: Pain, AVCPU, Breathing device
+        # Also, the binaries: Nausea and Vomiting
+        categorical_fills = {
+            "Obs_AVCPU": AVCPU_Ordered_Scale[0],  # A - Alert
+            "Obs_Pain": Pain_Ordered_Scale[0],  # 0 - No pain
+            "Obs_BreathingDevice": "A - AIR",
+            "Obs_Nausea": 0,
+            "Obs_Vomiting": 0,
+        }
+        static_fills |= {
+            column: fill
+            for series, fill in categorical_fills.items()
+            for column in set(SalfordTimeseries[series]).intersection(df.columns)
+        }
+
+        df.fillna(static_fills, inplace=True)
+
+        return df
+
+    def single_imputation_bloods(self, return_df=False):
+        """ Quickly imputes the laboratory results
+        :returns: New SalfordData instance with the entries altered
+            if return_df: pd.DataFrame instance with the imputed entries
+        """
+        df = (
+            self[SalfordFeatures.Blood].copy()
+            if return_df
+            else self
+        )
+
+        static_fills = {_: df[_].median() for _ in SalfordFeatures.Blood}
+
+        df.fillna(static_fills, inplace=True)
+
+        return df
+
 
 SalfordFeatures = DotDict(
     Admin=["SpellSerial", "PatientNumber",],
@@ -710,6 +763,26 @@ SalfordFeatures = DotDict(
         if str(parent).startswith("Obs_")
     ],
     CompositeScores=["CFS_Score", "Waterlow_Score", "Waterlow_Outcome"],
+    First_Blood=[
+        cols[0]
+        for parent, cols in SalfordTimeseries.items()
+        if str(parent).startswith("Blood_")
+    ],
+    First_VBG=[
+        cols[0]
+        for parent, cols in SalfordTimeseries.items()
+        if str(parent).startswith("VBG_")
+    ],
+    First_NEWS=[
+        cols[0]
+        for parent, cols in SalfordTimeseries.items()
+        if str(parent).startswith("NEWS_")
+    ],
+    First_Obs=[
+        cols[0]
+        for parent, cols in SalfordTimeseries.items()
+        if str(parent).startswith("Obs_")
+    ],
 )
 
 SalfordFeatures["TimeSeries"] = dict(

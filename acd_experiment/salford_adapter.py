@@ -26,23 +26,25 @@ class SalfordAdapter(SalfordData, BaseDataset):
         )
 
     def categorize(self, categories=None):
-        return SalfordAdapter(super().categorize(categories))
+        return SalfordAdapter(super().convert_str_to_categorical())
 
-    @property
-    def feature_group_combinations(self):
-        r = dict(news_scores=SalfordACDFeatures["NEWS"])
-        r["news_scores_with_phenotype"] = (
-            r["news_scores"] + SalfordACDFeatures["Phenotype"]
+    def feature_group_combinations(self, scored=False):
+        r = {}
+        if scored:
+            r["news"] = SalfordFeatures.First_NEWS
+        else:
+            r["news"] = SalfordACDFeatures["NEWS_Raw"]
+
+        r["with_phenotype"] = (
+            r["news"]
+            + SalfordACDFeatures['NEWS_Extensions']
+            + SalfordFeatures.Demographics
         )
-        r["scores_with_labs"] = (
-            r["news_scores_with_phenotype"] + SalfordACDFeatures["Labs"]
-        )
-        r["scores_with_notes_and_labs"] = (
-            r["scores_with_labs"] + SalfordACDFeatures["Notes"]
-        )
-        r["scores_with_notes_labs_and_hospital"] = (
-            r["scores_with_notes_and_labs"] + SalfordACDFeatures["Hospital"]
-        )
+        r["with_composites"] = r["with_phenotype"] + SalfordACDFeatures['Composite']
+        r["with_labs"] = r["with_composites"] + SalfordFeatures.First_Blood
+        r["with_notes"] = r["with_labs"] + SalfordACDFeatures["Notes"]
+        r["with_services"] = r["with_notes"] + SalfordACDFeatures["Services"]
+
         return r
 
     def fill_na(self):
@@ -57,19 +59,11 @@ class SalfordAdapter(SalfordData, BaseDataset):
         return r
 
     def impute_news(self):
-        static_fills = {col: 0 for col in SalfordACDFeatures["NEWS"]}
-
-        for col, val in static_fills.items():
-            if col in self.columns:
-                self[col] = self[col].fillna(val)
-
+        SalfordAdapter(super().single_imputation_obs_and_news())
         return self
 
     def impute_blood(self):
-        for _ in SalfordACDFeatures["Labs"]:
-            ser = pd.to_numeric(self[_], errors="coerce")
-            self[_] = ser.fillna(ser.median())
-
+        SalfordAdapter(super().single_imputation_bloods())
         return self
 
     def xy(
@@ -87,7 +81,12 @@ class SalfordAdapter(SalfordData, BaseDataset):
         if imputation:
             X = self.impute_news().impute_blood()
 
-        critical_care = self.derive_critical_care(within=outcome_within, wards=['CCU', 'HH1M'], ignore_admit_ward=False, return_series=True)
+        critical_care = self.derive_critical_care(
+            within=outcome_within,
+            wards=["CCU", "HH1M"],
+            ignore_admit_ward=False,
+            return_series=True,
+        )
         mortality = self.derive_mortality(within=outcome_within, return_series=True)
         if outcome == "CriticalCare":
             y = critical_care
@@ -121,23 +120,22 @@ class SalfordAdapter(SalfordData, BaseDataset):
 
 
 SalfordACDFeatures = dict(
-    NEWS=[
-        "NEWS_RespiratoryRate_Admission",
-        "NEWS_O2Sat_Admission",
-        "NEWS_Temperature_Admission",
-        "NEWS_BP_Admission",
-        "NEWS_HeartRate_Admission",
-        "NEWS_AVCPU_Admission",
-        "NEWS_BreathingDevice_Admission",
+    NEWS_Raw=[
+        "Obs_RespiratoryRate_Admission",
+        "Obs_O2Sats_Admission",
+        "Obs_Temperature_Admission",
+        "Obs_SystolicBP_Admission",
+        "Obs_HeartRate_Admission",
+        "Obs_AVCPU_Admission",
     ],
-    Phenotype=["Female", "Age"],
+    NEWS_Extensions=[
+        "Obs_BreathingDevice_Admission",
+        "Obs_DiastolicBP_Admission",
+        "Obs_Pain_Admission",
+        "Obs_Nausea_Admission",
+        "Obs_Vomiting_Admission",
+    ],
+    Composite=SalfordFeatures.CompositeScores + ["CharlsonIndex"],
     Notes=["AE_PresentingComplaint", "AE_MainDiagnosis"],
-    Labs=[
-        "Blood_Haemoglobin_Admission",
-        "Blood_Urea_Admission",
-        "Blood_Sodium_Admission",
-        "Blood_Potassium_Admission",
-        "Blood_Creatinine_Admission",
-    ],
-    Hospital=["AdmitMethod", "AdmissionSpecialty", "SentToSDEC", "Readmission"],
+    Services=["AdmitMethod", "AdmissionSpecialty", "SentToSDEC", "Readmission"],
 )

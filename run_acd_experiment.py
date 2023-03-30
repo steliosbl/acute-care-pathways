@@ -14,18 +14,7 @@ logging.basicConfig(
 
 if __name__ == "__main__":
     parser = construct_parser()
-    logging.info("Constructing SCI dataset")
-    scii = (
-        SCIData(
-            SCIData.quickload("data/SCI/sci_processed.h5").sort_values(
-                "AdmissionDateTime"
-            )
-        )
-        .mandate(SCICols.news_data_raw)
-        .derive_ae_diagnosis_stems(onehot=False)
-    )
     logging.info("Constructing Salford dataset")
-    sal = pd.read_hdf(f'data/Salford/sal_processed.h5', 'table')
-    sal = SalfordAdapter(sal.loc[np.intersect1d(sal.index, scii.SpellSerial)])
+    sal = SalfordAdapter(pd.read_hdf(f'data/Salford/sal_processed.h5', 'table'))
     logging.info("Starting experiment")
     run_experiment(parser.parse_args(), sal)

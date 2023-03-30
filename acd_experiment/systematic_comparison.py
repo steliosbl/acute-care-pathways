@@ -39,10 +39,10 @@ def oneclass_split(X_train, y_train, kf):
 
 def study_grid_from_args(args, scii):
     estimators = dict(
-        cpu=[
+        all=[
             #      Estimator_IsolationForest,
             Estimator_LightGBM,
-            Estimator_LogisticRegression,
+            #      Estimator_LogisticRegression,
             #      Estimator_RandomForest,
             Estimator_XGBoost,
             Estimator_LinearSVM,
@@ -50,33 +50,18 @@ def study_grid_from_args(args, scii):
             Estimator_L1Regression,
             Estimator_L2Regression,
             Estimator_ElasticNetRegression,
-        ],
-        # gpu=[Estimator_TabNet],
-    )
-    estimators["all"] = estimators["cpu"]  # + estimators["gpu"]
-    estimators.update({_._name: [_] for _ in estimators["all"]})
-
-    features = scii.feature_group_combinations
-    if args["select_features"]:
-        select = [
-            #   "news",
-            "news_scores",
-            #     "news_with_phenotype",
-            "news_scores_with_phenotype",
-            #      "with_labs",
-            "scores_with_labs",
-            #      "with_notes_and_labs",
-            "scores_with_notes_and_labs",
-            #      "with_notes_labs_and_hospital",
-            "scores_with_notes_labs_and_hospital",
         ]
-        features = {_: features[_] for _ in select}
+    )
+    estimators = estimators | {_._name: [_] for _ in estimators["all"]}
+
+    features = scii.feature_group_combinations(scored=args['scored_features'])
 
     r = dict(estimators=estimators[args["models"]], features=features, scii=scii)
+
     if args["time_thresholds"]:
         r = dict(resamplers=[None], outcome_thresholds=list(range(1, 31))) | r
     else:
-        r = dict(resamplers=[None], outcome_thresholds=[1],) | r
+        r = dict(resamplers=[None], outcome_thresholds=[1]) | r
 
     return study_grid(**r)
 
@@ -341,7 +326,7 @@ def construct_study(
 def construct_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-m", "--models", help="Can be 'all', 'cpu'", type=str, default="all"
+        "-m", "--models", help="Can be 'all', 'LightGBM', etc.", type=str, default="all"
     )
     parser.add_argument(
         "-j", "--njobs", help="Number of CPUs to use. Default=1", type=int, default=1
@@ -368,7 +353,7 @@ def construct_parser():
         action="store_true",
     )
     parser.add_argument(
-        "-t", "--trials", help="Number of trials. Default=1000", type=int, default=1000
+        "-t", "--trials", help="Number of trials. Default=1000", type=int, default=100
     )
     parser.add_argument(
         "-hr", "--hours", help="Trial timeout in hours", type=int, default=2
@@ -389,7 +374,7 @@ def construct_parser():
     )
     parser.add_argument("-v", "--verbose", help="Optuna verbosity", action="store_true")
     parser.add_argument(
-        "--select_features", help="Limit feature groups", action="store_true"
+        "--scored_features", help="Limit feature groups", action="store_true", default=False
     )
     parser.add_argument("--outcome", help="The target label", default="CriticalEvent")
 
@@ -409,24 +394,24 @@ def run_experiment(args, scii):
 
     if args["debug"]:
         scii = type(scii)(scii.sample(10000))
+        args['trials'] = 2
+        args['n_resamples'] = 10
+        args['vecbose'] = True
 
     if args["storage"] is not None:
         args["storage"] = optuna.storages.RDBStorage(
             url=args["storage"], engine_kwargs={"connect_args": {"timeout": 100}}
         )
 
-    n_trials = args["trials"] if not args["debug"] else 2
-    n_resamples = args["n_resamples"] if not args["debug"] else 10
-
     studies = [
-        construct_study(**_, **args, scii=scii, n_trials=n_trials)
+        construct_study(**_, **args, scii=scii, n_trials=args["trials"])
         for _ in study_grid_from_args(args, scii.omit_redundant().categorize())
     ]
 
     study_args = dict(
         model_persistence_path=args["persist"],
-        n_resamples=n_resamples,
-        n_trials=n_trials,
+        n_resamples=args["n_resamples"],
+        n_trials=args["trials"],
         timeout=args["hours"] * 60 * 60,
     )
 
