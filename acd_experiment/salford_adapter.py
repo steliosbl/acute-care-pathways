@@ -136,6 +136,6 @@ SalfordACDFeatures = dict(
         "Obs_Vomiting_Admission",
     ],
     Composite=SalfordFeatures.CompositeScores + ["CharlsonIndex"],
-    Notes=["AE_PresentingComplaint", "AE_MainDiagnosis"],
+    Notes=["AE_PresentingComplaint"],#, "AE_MainDiagnosis"],
     Services=["AdmitMethod", "AdmissionSpecialty", "SentToSDEC", "Readmission"],
 )

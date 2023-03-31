@@ -225,7 +225,7 @@ def construct_study(
     feature_group: str,
     features: Iterable[str],
     outcome_within: int,
-    cv=5,
+    cv=4,
     scoring="average_precision",
     storage=None,
     model_persistence_path=None,
@@ -332,7 +332,7 @@ def construct_parser():
         "-j", "--njobs", help="Number of CPUs to use. Default=1", type=int, default=1
     )
     parser.add_argument(
-        "-c", "--cv_jobs", help="Number of CV jobs. Default=5", type=int, default=5
+        "-c", "--cv_jobs", help="Number of CV jobs. Default=4", type=int, default=4
     )
     parser.add_argument(
         "-p",
