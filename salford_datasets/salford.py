@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import json
+from collections import defaultdict
 
 from .salford_raw import (
     SalfordTimeseries,
@@ -10,6 +11,8 @@ from .salford_raw import (
     AEVaguePresentingComplaints,
     AVCPU_Ordered_Scale,
     Pain_Ordered_Scale,
+    SalfordTimeseriesPrettyPrint,
+    SalfordTimeseriesUnits,
 )
 from .icd10 import ICD10Table
 from .ccs import CCSTable
@@ -345,7 +348,7 @@ class SalfordData(pd.DataFrame):
         """
         diagnoses = (
             self.derive_ccs(grouping=grouping, return_df=True)
-            if derive_ccs
+            if derive_ccsb
             else self.Diagnoses
         )
 
@@ -366,14 +369,14 @@ class SalfordData(pd.DataFrame):
         return SalfordData(
             pd.concat(
                 [
-                    self.drop("AE_MainDiagnosis", axis=1),
+                    # self.drop("AE_MainDiagnosis", axis=1),
                     self.derive_mortality(within=within, return_series=True),
                     self.derive_critical_care(within=within, return_series=True),
                     self.derive_critical_event(within=within, return_series=True),
                     self.derive_readmission(return_series=True),
                     # self.derive_readmission_band(return_series=True),
                     self.derive_sdec(return_series=True),
-                    self.derive_ae_diagnosis_stems(return_series=True),
+                    # self.derive_ae_diagnosis_stems(return_series=True),
                     self.derive_charlson_index(return_series=True),
                 ],
                 axis=1,
@@ -673,17 +676,85 @@ class SalfordData(pd.DataFrame):
         :returns: New SalfordData instance with the entries altered
             if return_df: pd.DataFrame instance with the imputed entries
         """
-        df = (
-            self[SalfordFeatures.Blood].copy()
-            if return_df
-            else self
-        )
+        df = self[SalfordFeatures.Blood].copy() if return_df else self
 
         static_fills = {_: df[_].median() for _ in SalfordFeatures.Blood}
 
         df.fillna(static_fills, inplace=True)
 
         return df
+
+    def tabular_to_text(self, columns=None):
+        """ Converts the structured records into unstructured text 
+        :param columns: The columns to include in the conversion
+        :returns: pd.Series with the text-ified records """
+        df = self[columns] if columns is not None else self
+
+        demographics = []
+
+        if "Age" in df:
+            demographics.append(df.Age.astype(str) + " years old")
+        if "Ethnicity" in df:
+            demographics.append(df.Ethnicity)
+        if "Female" in df:
+            demographics.append(df.Female.replace({True: "Female", False: "Male"}))
+
+        demographics = (
+            pd.concat(demographics, axis=1).apply(
+                lambda row: " ".join(row.dropna()), axis=1
+            )
+            + "; "
+        )
+
+        diagnoses = (
+            df.loc[:, df.columns.isin(SalfordFeatures.Diagnoses)].apply(
+                lambda row: "; ".join(row.dropna()), axis=1
+            )
+            + "; "
+        )
+
+        df = df.drop(
+            SalfordFeatures.Demographics + SalfordFeatures.Diagnoses,
+            axis=1,
+            errors="ignore",
+        ).rename(columns=SalfordPrettyPrint)
+
+        units = defaultdict(lambda: "") | {
+            SalfordPrettyPrint[column]: unit
+            for column, unit in SalfordFeatureUnits.items()
+        }
+
+        string_columns = (
+            df.select_dtypes(object).apply(
+                lambda row: "; ".join(
+                    (f'{_[0]} is "{_[1]}"' for _ in row.dropna().items())
+                ),
+                axis=1,
+            )
+            + "; "
+        )
+
+        bool_columns = (
+            df.select_dtypes(bool).apply(
+                lambda row: "; ".join((_[0] for _ in row.dropna().items() if _[1])),
+                axis=1,
+            )
+            + "; "
+        )
+
+        num_columns = (
+            df.select_dtypes(np.number).apply(
+                lambda row: "; ".join(
+                    (f"{_[0]} is {_[1]} {units[_[0]]}" for _ in row.dropna().items())
+                ),
+                axis=1,
+            )
+            + "; "
+        )
+
+        return (
+            demographics + string_columns + bool_columns + num_columns + diagnoses
+        ).str.lower()
 
 
 SalfordFeatures = DotDict(
@@ -785,9 +856,66 @@ SalfordFeatures = DotDict(
     ],
 )
 
-SalfordFeatures["TimeSeries"] = dict(
-    NEWS=SalfordFeatures["NEWS"],
-    Blood=SalfordFeatures["Blood"],
-    VBG=SalfordFeatures["VBG"],
-    Obs=SalfordFeatures["Obs"],
+SalfordPrettyPrint = (
+    {__: __ for _ in SalfordFeatures.values() for __ in _}
+    | {
+        "PatientNumber": "Patient Number",
+        "Female": "Sex",
+        "AE_PresentingComplaint": "Presenting Complaint",
+        "AE_Arrival": "A&E Arrival Time",
+        "AE_Departure": "A&E Departure Time",
+        "AE_Location": "A&E Location",
+        "AE_PatientGroup": "A&E Patient Group",
+        "AE_TriageNote": "Triage Note",
+        "AdmissionDate": "Admission Date",
+        "DischargeDate": "Discharge Date",
+        "ElectiveAdmission": "Elective Admission",
+        "AdmitMethod": "Admission Pathway",
+        "AdmissionSpecialty": "Admitting Specialty",
+        "DischargeConsultant": "Discharge Consultant",
+        "DischargeSpecialty": "Discharge Specialty",
+        "TotalLOS": "Length of Stay",
+        "LOSBand": "LOS Band",
+        "AdmitWard": "Admitting Ward",
+        "AdmitWardLOS": "Admitting Ward LOS",
+        "DischargeWard": "Discharge Ward",
+        "DischargeWardLOS": "Discharge Ward LOS",
+        "MainICD10": "Main ICD-10",
+        "MainDiagnosis": "Main Diagnosis",
+        "MainOPCS4": "Main OPCS-4",
+        "MainProcedure": "Main Procedure",
+        "Outcode_Area": "Outcode Area",
+        "CareHome": "Care Home",
+        "DiedDuringStay": "Died During Stay",
+        "DiedWithin30Days": "Died Within 30 Days",
+        "DischargeDestination": "Discharge Destination",
+        "CFS_Score": "Clinical Frailty Score",
+        "Waterlow_Score": "Waterlow Score",
+        "Waterlow_Outcome": "Waterlow Outcome",
+        "HasDNAR": "Has DNAR",
+        "CriticalCare": "Critical Care",
+        "CriticalEvent": "Critical Event",
+        "Readmission": "Readmission",
+        "SentToSDEC": "SDEC Allocation",
+        "AE_MainDiagnosis": "A&E Diagnosis",
+        "CharlsonIndex": "Charlson Index",
+    }
+    | SalfordTimeseriesPrettyPrint
 )
+
+SalfordFeatureUnits = (
+    {
+        "Age": "Years",
+        "TotalLOS": "Days",
+        "CFS_Score": "",
+        "Waterlow_Score": "",
+        "CharlsonIndex": "",
+    }
+    | {_: "Days" for _ in SalfordFeatures.WardLOS}
+    | {
+        col: SalfordTimeseriesUnits[parent]
+        for parent, cols in SalfordTimeseries.items()
+        for col in cols
+    }
+)
+

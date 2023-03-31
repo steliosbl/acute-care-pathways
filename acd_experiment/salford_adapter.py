@@ -28,7 +28,8 @@ class SalfordAdapter(SalfordData, BaseDataset):
     def categorize(self, categories=None):
         return SalfordAdapter(super().convert_str_to_categorical())
 
-    def feature_group_combinations(self, scored=False):
+    @classmethod
+    def feature_group_combinations(cls, scored=False):
         r = {}
         if scored:
             r["news"] = SalfordFeatures.First_NEWS

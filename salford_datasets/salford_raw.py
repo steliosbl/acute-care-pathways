@@ -390,6 +390,95 @@ AEVaguePresentingComplaints = [
     "gen unwell",
 ]
 
-AVCPU_Ordered_Scale = ['A - Alert', 'V - Responds to voice', 'C - New onset of confusion', 'P - Responds to pain', 'U - Unconscious']
+AVCPU_Ordered_Scale = [
+    "A - Alert",
+    "V - Responds to voice",
+    "C - New onset of confusion",
+    "P - Responds to pain",
+    "U - Unconscious",
+]
 
-Pain_Ordered_Scale = ['0 - No pain', '1 - Mild pain', '2 - Moderate pain', '3 - Severe pain']
+Pain_Ordered_Scale = [
+    "0 - No pain",
+    "1 - Mild pain",
+    "2 - Moderate pain",
+    "3 - Severe pain",
+]
+
+_timeseries_prettyprint = {_: _ for _ in SalfordTimeseries.keys()} | {
+    "Blood_DDimer": "Blood D-dimer",
+    "Blood_CRP": "Blood C-Reactive Protein",
+    "Blood_WhiteCount": "Blood White Blood Cell Count",
+    "NEWS_Score": "NEWS_Score",
+    "NEWS_RespiratoryRate": "NEWS Respiratory Rate",
+    "NEWS_BreathingDevice": "NEWS Assisted Breathing Device",
+    "NEWS_O2Sat": "NEWS O2 Sats",
+    "NEWS_Temperature": "NEWS Temperature",
+    "NEWS_BP": "NEWS Systolic Blood Pressure",
+    "NEWS_HeartRate": "NEWS Heart Rate",
+    "NEWS_AVCPU": "NEWS Alertness Scale",
+    "Obs_RespiratoryRate": "Obs Respiratory Rate",
+    "Obs_BreathingDevice": "Obs Assisted Breathing Device",
+    "Obs_O2Sats": "Obs O2 Sats",
+    "Obs_Temperature": "Obs Temperature",
+    "Obs_SystolicBP": "Obs Systolic Blood Pressure",
+    "Obs_DiastolicBP": "Obs Diastolic Blood Pressure",
+    "Obs_HeartRate": "Obs Heart Rate",
+    "Obs_AVCPU": "Obs Alertness Scale",
+    "Obs_Pain": "Obs Pain Scale",
+    "Obs_Nausea": "Obs Nausea",
+    "Obs_Vomiting": "Obs Vomiting",
+}
+
+_timeseries_labelling_pretty = [
+    "First",
+    "24 Hours Post Admission",
+    "24 Hours Pre-Discharge",
+    "Last",
+]
+SalfordTimeseriesPrettyPrint = {
+    SalfordTimeseries[parent][
+        _
+    ]: f"{_timeseries_labelling_pretty[_]} {parent_pretty.replace('_', ' ')}"
+    for parent, parent_pretty in _timeseries_prettyprint.items()
+    for _ in range(4)
+}
+
+SalfordTimeseriesUnits = {
+    "Blood_Haemoglobin": "g/L",
+    "Blood_Urea": "mg/dl",
+    "Blood_Sodium": "mmol/L",
+    "Blood_Potassium": "mEq/L",
+    "Blood_Creatinine": "micro mol/L",
+    "Blood_DDimer": "ng/ML FEU",
+    "Blood_CRP": "mg/L",
+    "Blood_Albumin": "g/L",
+    "Blood_WhiteCount": "n*10^9/L",
+    "VBG_Temperature": "Degrees Celsius",
+    "VBG_pCO2": "kPa",
+    "VBG_pCO2_Corrected": "kPa",
+    "VBG_PH": "pH",
+    "VBG_PH_Corrected": "pH",
+    "VBG_O2": "kPa",
+    "VBG_O2_Corrected": "kPa",
+    "NEWS_Score": "",
+    "NEWS_RespiratoryRate": "",
+    "NEWS_BreathingDevice": "",
+    "NEWS_O2Sat": "",
+    "NEWS_Temperature": "",
+    "NEWS_BP": "",
+    "NEWS_HeartRate": "",
+    "NEWS_AVCPU": "",
+    "Obs_RespiratoryRate": "Breaths/Minute",
+    "Obs_BreathingDevice": "",
+    "Obs_O2Sats": "%",
+    "Obs_Temperature": "Degrees Celsius",
+    "Obs_SystolicBP": "mmHg",
+    "Obs_DiastolicBP": "mmHg",
+    "Obs_HeartRate": "Beats/Minute",
+    "Obs_AVCPU": "",
+    "Obs_Pain": "",
+    "Obs_Nausea": "",
+    "Obs_Vomiting": "",
+}
+
