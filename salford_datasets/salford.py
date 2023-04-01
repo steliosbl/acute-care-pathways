@@ -136,8 +136,8 @@ class SalfordData(pd.DataFrame):
         within=1,
         col_name="CriticalEvent",
         return_series=False,
-        wards=["CCU"],
-        ignore_admit_ward=True,
+        wards=["CCU", "HH1M"],
+        ignore_admit_ward=False,
     ):
         """ Determines critical event occurrence, i.e., a composite of critical care admission or mortality
         :param within: Threshold of maximum LOS to consider events for. Critical care admission or mortality that occurs after this value won't be counted.
@@ -369,7 +369,7 @@ class SalfordData(pd.DataFrame):
         return SalfordData(
             pd.concat(
                 [
-                    # self.drop("AE_MainDiagnosis", axis=1),
+                    self, # self.drop("AE_MainDiagnosis", axis=1),
                     self.derive_mortality(within=within, return_series=True),
                     self.derive_critical_care(within=within, return_series=True),
                     self.derive_critical_event(within=within, return_series=True),
@@ -699,12 +699,15 @@ class SalfordData(pd.DataFrame):
         if "Female" in df:
             demographics.append(df.Female.replace({True: "Female", False: "Male"}))
 
-        demographics = (
-            pd.concat(demographics, axis=1).apply(
-                lambda row: " ".join(row.dropna()), axis=1
+        result = None
+        if len(demographics):
+            result = (
+                pd.concat(demographics, axis=1).apply(
+                    lambda row: " ".join(row.dropna()), axis=1
+                )
+                + "; "
             )
-            + "; "
-        )
+
 
         diagnoses = (
             df.loc[:, df.columns.isin(SalfordFeatures.Diagnoses)].apply(
@@ -712,6 +715,7 @@ class SalfordData(pd.DataFrame):
             )
             + "; "
         )
+        result = diagnoses if result is None else (result + diagnoses)
 
         df = df.drop(
             SalfordFeatures.Demographics + SalfordFeatures.Diagnoses,
@@ -724,7 +728,8 @@ class SalfordData(pd.DataFrame):
             for column, unit in SalfordFeatureUnits.items()
         }
 
-        string_columns = (
+        # String columns
+        result += (
             df.select_dtypes(object).apply(
                 lambda row: "; ".join(
                     (f'{_[0]} is "{_[1]}"' for _ in row.dropna().items())
@@ -734,7 +739,8 @@ class SalfordData(pd.DataFrame):
             + "; "
         )
 
-        bool_columns = (
+        # Boolean columns
+        result += (
             df.select_dtypes(bool).apply(
                 lambda row: "; ".join((_[0] for _ in row.dropna().items() if _[1])),
                 axis=1,
@@ -742,7 +748,8 @@ class SalfordData(pd.DataFrame):
             + "; "
         )
 
-        num_columns = (
+        # Numerical columns
+        result += (
             df.select_dtypes(np.number).apply(
                 lambda row: "; ".join(
                     (f"{_[0]} is {_[1]} {units[_[0]]}" for _ in row.dropna().items())
@@ -752,10 +759,14 @@ class SalfordData(pd.DataFrame):
             + "; "
         )
 
-        return (
-            demographics + string_columns + bool_columns + num_columns + diagnoses
-        ).str.lower()
+        return result.str.lower()
 
+    def bool_to_int(self, inplace=True):
+        df = self if inplace else self.copy()
+        mask = df.select_dtypes(bool)
+        df[mask.columns] = mask.astype(int)
+
+        return df
 
 SalfordFeatures = DotDict(
     Admin=["SpellSerial", "PatientNumber",],
@@ -919,3 +930,27 @@ SalfordFeatureUnits = (
     }
 )
 
+def _generate_salford_feature_combinations():
+    r = DotDict()
+    r['news'] = [
+        "Obs_RespiratoryRate_Admission",
+        "Obs_O2Sats_Admission",
+        "Obs_Temperature_Admission",
+        "Obs_SystolicBP_Admission",
+        "Obs_HeartRate_Admission",
+        "Obs_AVCPU_Admission",
+    ]
+    r['with_phenotype'] = r['news'] + [
+        "Obs_BreathingDevice_Admission",
+        "Obs_DiastolicBP_Admission",
+        "Obs_Pain_Admission",
+        "Obs_Nausea_Admission",
+        "Obs_Vomiting_Admission",
+    ] + SalfordFeatures.Demographics
+
+    r["with_composites"] = r["with_phenotype"] + SalfordFeatures.CompositeScores + ['CharlsonIndex']
+    r["with_labs"] = r["with_composites"] + SalfordFeatures.First_Blood
+    r["with_services"] = r["with_labs"] + ["AdmitMethod", "AdmissionSpecialty", "SentToSDEC", "Readmission"]
+    return r
+
+SalfordCombinations = _generate_salford_feature_combinations()
