@@ -18,4 +18,4 @@ port=8572
 /usr/bin/ssh -N -f -R $port:localhost:$port ncc1.clients.dur.ac.uk
 
 #Start the notebook
-jupyter notebook --no-browser --port $port --NotebookApp.token=231671d7ef929624c019792a4396ac0d7442776b1f4e83d0
+jupyter notebook --no-browser --port $port 
