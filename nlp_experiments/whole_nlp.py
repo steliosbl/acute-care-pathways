@@ -123,21 +123,24 @@ class CustomTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 
-def compute_metric(eval_pred, metrics=None):
+def compute_metric(eval_pred, metrics=None, multiclass=False):
     """ Compute given metrics given outputs from a HF model
     :param eval_pred: Output from a HF model
     :param metrics: List[str] of metrics to compute, if None use a set of defaults for binary classification
+    :param multiclass: bool, if True then use multiclass metrics (notably F1 score)
     :return: metrics
     """
 
     if metrics is None:
         metrics = ["accuracy", "f1", "precision", "recall"]
 
+    average = 'macro' if multiclass else 'binary'
+
     metric = evaluate.combine(metrics)
     predictions, labels = eval_pred
     predictions = np.argmax(predictions, 1)
 
-    return metric.compute(predictions=predictions, references=labels)
+    return metric.compute(predictions=predictions, references=labels, average=average)
 
 
 def main():

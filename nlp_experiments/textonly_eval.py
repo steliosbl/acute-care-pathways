@@ -26,7 +26,9 @@ def main():
     parser.add_argument('--text-features', choices=['triage', 'triage_diagnosis', 'triage_complaint'],
                         default='triage', help='The combination of text features to include')
     parser.add_argument('--demographics', action='store_true', help='Include (text-encoded) patient demographics')
-    parser.add_argument("--target", choices=["CriticalEvent", "Ethnicity", "SentToSDEC", "LOSBand", "Readmission"],
+    parser.add_argument("--target", choices=["CriticalEvent", "Ethnicity", "SentToSDEC", "LOSBand", "Readmission",
+                                             "ReadmissionBand", "ReadmissionPneumonia", "EthnicityHA",
+                                             "Readmitted", "ReadmittedPneumonia"],
                         default="CriticalEvent", help="Target variable to predict")
 
     parser.add_argument('--model-name', type=str,
@@ -37,6 +39,8 @@ def main():
 
     args = parser.parse_args()
 
+    multiclass = args.target not in ["CriticalEvent", "SentToSDEC", "Readmission", "ReadmissionPneumonia", "Readmitted",
+                                     "ReadmittedPneumonia"]
     dataset, _, _, num_labels = get_textonly_dataset(args.data_path, args.target, args.text_features, args.demographics)
 
     # Get model, tokenizer
@@ -67,7 +71,10 @@ def main():
         else:
             pred_proba.append(out['score'])
 
-    metrics = get_metrics(pd.DataFrame(encoded_dataset['test']['label']), pred_labels, pred_proba)
+    if multiclass:
+        metrics = []
+    else:
+        metrics = get_metrics(pd.DataFrame(encoded_dataset['test']['label']), pred_labels, pred_proba)
 
     text = f"-------- {args.model_name} EVALn ---------\n\n{metrics}"
 

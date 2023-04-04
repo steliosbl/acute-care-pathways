@@ -34,11 +34,42 @@ def get_textonly_dataset(data_path, target, text_features, demographics=True, co
     metrics = None
     best_metric = 'f1'
     num_labels = 2
-    if target in ["Ethnicity", "LOSBand"]:
+    if target == "Ethnicity":
         dataset.group_ethnicity(5)
         metrics = ['accuracy']
         best_metric = metrics[0]
         num_labels = len(dataset[target].unique())
+    elif target == "EthnicityHA":
+        # Only keep patients who were diagnoses with a heart attack, contains accepts regex
+        dataset = SalfordData(dataset[dataset["MainICD10"].str.contains('I20|I21|I22|I23|I24', na=False)])
+
+        # Rename to actual target column
+        target = "Ethnicity"
+
+        dataset = SalfordData(dataset.group_ethnicity(100))
+        metrics = ['accuracy']
+        best_metric = 'loss'
+        num_labels = len(dataset[target].unique())
+    elif target == "LOSBand":
+        metrics = ['accuracy']
+        best_metric = metrics[0]
+        num_labels = len(dataset[target].unique())
+    elif target == "ReadmissionBand":
+        # the .fillna call in derive_readmission_band means a SalfordData instance isn't returned
+        dataset = SalfordData(dataset.derive_readmission_band())
+
+        metrics = ['accuracy']
+        best_metric = 'loss'
+        num_labels = len(dataset[target].unique())
+
+        # dataset['ReadmissionBand'] is a pd.Categorical, which HF doesn't support
+        dataset['ReadmissionBand'] = dataset['ReadmissionBand'].cat.codes
+    elif target == "ReadmissionPneumonia":
+        dataset = SalfordData(dataset.derive_readmission_reason(col_name="ReadmissionPneumonia"))
+    elif target == "Readmitted":
+        dataset = SalfordData(dataset.derive_is_readmitted())
+    elif target == "ReadmittedPneumonia":
+        dataset = SalfordData(dataset.derive_is_readmitted_reason(col_name="ReadmittedPneumonia"))
     elif target == "CriticalEvent":
         dataset = dataset.derive_critical_event(wards=["CCU", "HH1M"], ignore_admit_ward=False)
 
@@ -80,7 +111,9 @@ def main():
     parser.add_argument("--sampling", help="Use under/oversampling", choices=['under', 'over', None], default=None)
     parser.add_argument("--column-name", help="Prepend column name before value in text representation",
                         action="store_true")
-    parser.add_argument("--target", choices=["CriticalEvent", "Ethnicity", "SentToSDEC", "LOSBand", "Readmission"],
+    parser.add_argument("--target", choices=["CriticalEvent", "Ethnicity", "SentToSDEC", "LOSBand", "Readmission",
+                                             "ReadmissionBand", "ReadmissionPneumonia", "EthnicityHA",
+                                             "Readmitted", "ReadmittedPneumonia"],
                         default="CriticalEvent", help="Target variable to predict")
 
     parser.add_argument('--model-name', type=str,
@@ -93,6 +126,8 @@ def main():
 
     args = parser.parse_args()
 
+    multiclass = args.target not in ["CriticalEvent", "SentToSDEC", "Readmission", "ReadmissionPneumonia", "Readmitted",
+                                     "ReadmittedPneumonia"]
     dataset, best_metric, metrics, num_labels = get_textonly_dataset(args.data_path, args.target, args.text_features,
                                                                      args.demographics, args.column_name)
 
@@ -145,7 +180,7 @@ def main():
             train_dataset=encoded_dataset['train'],
             eval_dataset=encoded_dataset['test'],
             tokenizer=tokenizer,
-            compute_metrics=lambda x: compute_metric(x, metrics)
+            compute_metrics=lambda x: compute_metric(x, metrics, multiclass=multiclass)
         )
     else:
         trainer = CustomTrainer(
@@ -154,7 +189,7 @@ def main():
             train_dataset=encoded_dataset['train'],
             eval_dataset=encoded_dataset['test'],
             tokenizer=tokenizer,
-            compute_metrics=compute_metric
+            compute_metrics=lambda x: compute_metric(x, multiclass=multiclass)
         )
 
     trainer.train()
