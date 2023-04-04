@@ -180,6 +180,74 @@ class SalfordData(pd.DataFrame):
             False
         )
 
+    def derive_is_readmitted(self, within=30, col_name="Readmitted", return_series=False):
+        """ Determines whether a patient goes on to be readmitted,
+            i.e. the same patient appears in a future record (chronologically) within the specified time window
+            :param within: Maximum time between discharge and latest admission to consider a readmission
+            :returns: New SalfordData instance with the new features added
+                if return_series: pd.Series instance of the new feature
+        """
+        readmission_time_spans_descending = self.sort_values(["PatientNumber", "AdmissionDate"], ascending=False)\
+            .groupby("PatientNumber")\
+            .AdmissionDate.diff()\
+            .dropna()
+        series = readmission_time_spans_descending > -pd.Timedelta(days=within)
+
+        return self._finalize_derived_feature(series, col_name, return_series).fillna(
+            False
+        )
+
+    def derive_is_readmitted_reason(
+            self, within=30, reason=None, col_name="ReadmittedReason", return_series=False
+    ):
+        """ Determines whether each record is readmitted with a given diagnosis
+        i.e. the same patient appeared in a previous record (chronologically) within the specified time window
+        :param within: Maximum time between last discharge and latest admission to consider a readmission
+        :param reason List of str, ICD10 codes to include as MainReason for admission
+        :returns: New SalfordData instance with the new features added
+            if return_series: pd.Series instance of the new feature
+        """
+        if reason is None:
+            reason = ['J18.9']
+
+        df = self.copy()
+        is_readmission_reason = self.derive_readmission_reason(within=within, reason=reason, return_series=True)
+        is_readmission = self.derive_readmission(within=within, return_series=True)
+
+        # Remove entries which are a readmission, but not for given reasons
+        df['ToDrop'] = is_readmission & ~is_readmission_reason
+        df = df[~df['ToDrop']]
+
+        df = SalfordData(df)
+        series = df.derive_is_readmitted(within=within, return_series=True)
+
+        return self._finalize_derived_feature(series, col_name, return_series).fillna(
+            False
+        )
+
+    def derive_readmission_reason(
+            self, within=30, reason=None, col_name="ReadmissionReason", return_series=False
+    ):
+        """ Determines whether each record is readmitted with a given diagnosis
+        i.e. the same patient appeared in a previous record (chronologically) within the specified time window
+        :param within: Maximum time between last discharge and latest admission to consider a readmission
+        :param reasonL List of str, ICD10 codes to include as MainReason for admission
+        :returns: New SalfordData instance with the new features added
+            if return_series: pd.Series instance of the new feature
+        """
+        if reason is None:
+            reason = ['J18.9']
+
+        # Get all patients which are readmissions in given timespan
+        readm_series = self._readmission_time_spans() < pd.Timedelta(days=within)
+        reason_series = self['MainICD10'].isin(reason)
+
+        series = readm_series & reason_series
+
+        return self._finalize_derived_feature(series, col_name, return_series).fillna(
+            False
+        )
+
     def derive_readmission_band(
         self,
         bins=[0, 1, 2, 7, 14, 30, 60],
