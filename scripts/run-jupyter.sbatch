@@ -4,8 +4,8 @@
 #SBATCH -c 4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=8GB
-#SBATCH --time=01-00:00:00
-#SBATCH --qos=short
+#SBATCH --time=07-00:00:00
+#SBATCH --qos=long-low-prio
 #SBATCH -p ug-gpu-small
 
 eval "$('/home2/kqcr86/anaconda3/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"

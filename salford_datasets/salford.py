@@ -705,15 +705,15 @@ class SalfordData(pd.DataFrame):
                 pd.concat(demographics, axis=1).apply(
                     lambda row: " ".join(row.dropna()), axis=1
                 )
-                + "; "
+                + " "
             )
 
 
         diagnoses = (
             df.loc[:, df.columns.isin(SalfordFeatures.Diagnoses)].apply(
-                lambda row: "; ".join(row.dropna()), axis=1
+                lambda row: " ".join(row.dropna().unique()), axis=1
             )
-            + "; "
+            + " "
         )
         result = diagnoses if result is None else (result + diagnoses)
 
@@ -731,21 +731,21 @@ class SalfordData(pd.DataFrame):
         # String columns
         result += (
             df.select_dtypes(object).apply(
-                lambda row: "; ".join(
+                lambda row: " ".join(
                     (f'{_[0]} is "{_[1]}"' for _ in row.dropna().items())
                 ),
                 axis=1,
             )
-            + "; "
+            + " "
         )
 
         # Boolean columns
         result += (
             df.select_dtypes(bool).apply(
-                lambda row: "; ".join((_[0] for _ in row.dropna().items() if _[1])),
+                lambda row: " ".join((_[0] for _ in row.dropna().items() if _[1])),
                 axis=1,
             )
-            + "; "
+            + " "
         )
 
         # Numerical columns
@@ -873,10 +873,10 @@ SalfordPrettyPrint = (
         "PatientNumber": "Patient Number",
         "Female": "Sex",
         "AE_PresentingComplaint": "Presenting Complaint",
-        "AE_Arrival": "A&E Arrival Time",
-        "AE_Departure": "A&E Departure Time",
-        "AE_Location": "A&E Location",
-        "AE_PatientGroup": "A&E Patient Group",
+        "AE_Arrival": "Emergency Department Arrival Time",
+        "AE_Departure": "Emergency Department Departure Time",
+        "AE_Location": "Emergency Department Location",
+        "AE_PatientGroup": "Emergency Department Patient Group",
         "AE_TriageNote": "Triage Note",
         "AdmissionDate": "Admission Date",
         "DischargeDate": "Discharge Date",
@@ -908,7 +908,7 @@ SalfordPrettyPrint = (
         "CriticalEvent": "Critical Event",
         "Readmission": "Readmission",
         "SentToSDEC": "SDEC Allocation",
-        "AE_MainDiagnosis": "A&E Diagnosis",
+        "AE_MainDiagnosis": "Emergency Department Diagnosis",
         "CharlsonIndex": "Charlson Index",
     }
     | SalfordTimeseriesPrettyPrint

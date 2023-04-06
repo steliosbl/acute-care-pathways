@@ -2,7 +2,8 @@ from collections import defaultdict
 import pandas as pd
 import numpy as np
 from scipy import stats as st
-import math
+import math, logging
+from pathlib import Path
 
 from IPython.display import display
 import matplotlib.pyplot as plt
@@ -37,11 +38,10 @@ from sklearn.dummy import DummyClassifier
 import torch
 from torch.nn import functional as F
 
-#from pytorch_tabnet.metrics import Metric as TabNetMetric
-
-#from shapely.geometry import LineString, Point
-
-#import shap
+from salford_datasets.salford import SalfordData
+from sklearn.model_selection import train_test_split
+from acd_experiment.sci import SCIData, SCICols
+import shap
 
 
 def dict_product(dicts):
@@ -166,3 +166,103 @@ def evaluate_from_pred(
 
     return metric_df, roc_fig, pr_fig, cm_fig
 
+def load_sal(re_derive=False, data_dir='data/Salford'):
+    data_dir = Path(data_dir)
+    if re_derive:
+        logging.info('Deriving from raw dataset')
+        sal = SalfordData.from_raw(
+            pd.read_hdf(data_dir/'raw_v2.h5', 'table')
+        ).augment_derive_all().expand_icd10_definitions().sort_values('AdmissionDate')
+        sal.to_hdf(data_dir/'sal_processed_transformers.h5', 'table')
+    else:
+        logging.info('Loading processed dataset')
+        sal = SalfordData(pd.read_hdf(data_dir/'sal_processed_transformers.h5', 'table'))
+
+    return sal
+
+def get_sci_indexes():
+    scii = (
+        SCIData(
+            SCIData.quickload("data/SCI/sci_processed.h5").sort_values(
+                "AdmissionDateTime"
+            )
+        )   
+        .mandate(SCICols.news_data_raw)
+        .derive_ae_diagnosis_stems(onehot=False)
+        .derive_critical_event(return_subcols=True, within=1)
+        .set_index('SpellSerial')
+    )
+
+    scii = SCIData(scii[
+        (~((scii.BreathingDevice=='NIV - NIV')&(scii.AdmitWard=='HH1M'))) #&
+    # (~scii.AdmissionMethodDescription.isin(['BOOKED ADMISSION ', 'ELECTIVE PLANNED']))
+    ].copy())
+
+    sci_train, sci_test = train_test_split(
+        scii,
+        test_size=0.33,
+        shuffle=False,
+    )
+
+    sci_test = sci_test[(
+    #  (~((scii.BreathingDevice=='NIV - NIV')&(scii.AdmitWard=='HH1M'))) &
+        (~sci_test.AdmissionMethodDescription.isin(['BOOKED ADMISSION ', 'ELECTIVE PLANNED']))
+    ) & (sci_test.Age >= 18)]
+
+    unseen_idx = sci_test[~sci_test.PatientNumber.isin(sci_train.PatientNumber)].index
+    sci_test_precovid = sci_test[sci_test.AdmissionDateTime < '2020-03-01']
+
+    return sci_train.index, sci_test.index, unseen_idx, sci_test_precovid.index
+
+
+def plot_shap_features_joint(
+    shap_values,
+    title=None,
+    max_display=20,
+    figsize=(16, 8),
+    bar_aspect=0.045,
+    wspace=-0.3,
+    topadjust=0.93,
+    save=None,
+    save_format="png",
+):
+    sns.set_style("whitegrid")
+    fig = plt.figure(figsize=figsize)
+
+    ax1 = fig.add_subplot(122, aspect="auto")
+    shap.summary_plot(
+        shap_values,
+        max_display=max_display,
+        show=False,
+        plot_size=None,
+        cmap=plt.get_cmap("coolwarm"),
+    )
+    ax1.set_yticklabels([])
+    ax1.tick_params(axis="both", which="major", labelsize=16)
+    ax1.tick_params(axis="both", which="minor", labelsize=14)
+    ax1.set_xlabel("(b) Episode-individual SHAP value", fontsize=16)
+    ax1.set_xlim((-4, 4))
+
+    ax2 = fig.add_subplot(121, aspect=bar_aspect)
+    shap.summary_plot(
+        shap_values,
+        plot_type="bar",
+        plot_size=None,
+        max_display=max_display,
+        show=False,
+        color="purple",
+    )
+    ax2.set_xlabel("(a) Mean absolute SHAP value", fontsize=16)
+    ax2.tick_params(axis="both", which="major", labelsize=16)
+    ax2.tick_params(axis="both", which="minor", labelsize=14)
+    plt.tight_layout()
+    plt.subplots_adjust(wspace=wspace)
+    plt.suptitle(title, fontsize=20)
+    plt.subplots_adjust(top=topadjust)
+    if save:
+        plt.savefig(
+            save,
+            bbox_inches="tight",
+            dpi=200 if save_format != "svg" else None,
+            format=save_format,
+        )

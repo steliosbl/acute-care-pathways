@@ -6,7 +6,7 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import StandardScaler
 
-from imblearn.over_sampling import SMOTE, SMOTENC
+#from imblearn.over_sampling import SMOTE, SMOTENC
 from typing import Iterable, Dict
 
 from .base_dataset import BaseDataset

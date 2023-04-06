@@ -67,6 +67,13 @@ class SalfordAdapter(SalfordData, BaseDataset):
         SalfordAdapter(super().single_imputation_bloods())
         return self
 
+    def ordinal_encode_categories(self):
+        r = self.copy()
+        mask = r.select_dtypes(include="category")
+        r[mask.columns] = mask.apply(lambda x: x.cat.codes)
+
+        return SalfordAdapter(r)
+
     def xy(
         self,
         x=[],

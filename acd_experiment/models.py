@@ -14,7 +14,7 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 
 from lightgbm import LGBMClassifier
 from xgboost import XGBClassifier
-from pytorch_tabnet.tab_model import TabNetClassifier
+# from pytorch_tabnet.tab_model import TabNetClassifier
 
 import shap
 
@@ -61,10 +61,10 @@ class Estimator:
 
     @classmethod
     def explain_calibrated(cls, model, X_train, X_test, cv_jobs=1):
-        # ordinal_encode = (
-        #     not cls._requirements["onehot"] and not cls._requirements["ordinal"]
-        # )
-        X = X_test#.ordinal_encode_categories() if ordinal_encode else X_test
+        ordinal_encode = (
+            not cls._requirements["onehot"] and not cls._requirements["ordinal"]
+        )
+        X = X_test.ordinal_encode_categories() if ordinal_encode else X_test
         if cls._requirements["scaling"]:
             X_trains, X_tests = (
                 [
@@ -86,7 +86,7 @@ class Estimator:
             explainers = Parallel(n_jobs=cv_jobs, verbose=10)(
                 delayed(
                     cls._explainer(
-                        _.base_estimator[cls._name],
+                        _.estimator,
                         masker=X_trains[i],
                         **cls._explainer_args,
                     )
@@ -96,7 +96,7 @@ class Estimator:
         else:
             explainers = [
                 cls._explainer(
-                    _.base_estimator[cls._name],
+                    _.estimator,
                     masker=X_trains[i],
                     **cls._explainer_args,
                 )(X_tests[i])
@@ -110,7 +110,7 @@ class Estimator:
             feature_names=X_test.columns,
         )
 
-        if cls._requirements["onehot"]:
+        if cls._requirements["onehot"] or True:
             cols = X_test.get_onehot_categorical_columns()
             if len(cols):
                 shap_values = group_explanations_by_categorical(
@@ -482,37 +482,37 @@ class Estimator_IsolationForest(Estimator):
         return cls.compile_parameters(suggestions)
 
 
-@dataclass
-class TabNetWrapper(TabNetClassifier):
-    weights: int = 0
-    max_epochs: int = 100
-    patience: int = 10
-    batch_size: int = 1024
-    virtual_batch_size: int = 128
-    drop_last: bool = True
-    eval_metric: Optional[str] = None
+# @dataclass
+# class TabNetWrapper(TabNetClassifier):
+#     weights: int = 0
+#     max_epochs: int = 100
+#     patience: int = 10
+#     batch_size: int = 1024
+#     virtual_batch_size: int = 128
+#     drop_last: bool = True
+#     eval_metric: Optional[str] = None
 
-    def fit(self, X, y):
-        return super().fit(
-            X_train=X.to_numpy(),
-            y_train=y.to_numpy(),
-            eval_metric=self.eval_metric,
-            weights=self.weights,
-            max_epochs=self.max_epochs,
-            patience=self.patience,
-            batch_size=self.batch_size,
-            virtual_batch_size=self.virtual_batch_size,
-            drop_last=self.drop_last,
-        )
+#     def fit(self, X, y):
+#         return super().fit(
+#             X_train=X.to_numpy(),
+#             y_train=y.to_numpy(),
+#             eval_metric=self.eval_metric,
+#             weights=self.weights,
+#             max_epochs=self.max_epochs,
+#             patience=self.patience,
+#             batch_size=self.batch_size,
+#             virtual_batch_size=self.virtual_batch_size,
+#             drop_last=self.drop_last,
+#         )
 
-    def predict(self, X):
-        return super().predict(X.to_numpy())
+#     def predict(self, X):
+#         return super().predict(X.to_numpy())
 
-    def predict_proba(self, X):
-        return super().predict_proba(X.to_numpy())
+#     def predict_proba(self, X):
+#         return super().predict_proba(X.to_numpy())
 
-    def decision_function(self, X):
-        return self.predict_proba(X)[:, 1]
+#     def decision_function(self, X):
+#         return self.predict_proba(X)[:, 1]
 
 
 class Estimator_LinearSVM(Estimator):
