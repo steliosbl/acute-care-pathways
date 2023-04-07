@@ -1235,20 +1235,6 @@ class SCIData(BaseDataset):
         return SCIData(r)
 
     @property
-    def numeric_columns(self):
-        return [
-            col
-            for col in self.select_dtypes(include="number")
-            if not np.isin(self[col].dropna().unique(), [0, 1]).all()
-        ]
-
-    @property
-    def binary_columns(self):
-        return [
-            col for col in self if np.isin(self[col].dropna().unique(), [0, 1]).all()
-        ]
-
-    @property
     def feature_groups(self):
         return dict(
             news=SCICols.news_data_raw,

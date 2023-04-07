@@ -12,6 +12,21 @@ class BaseDataset(pd.DataFrame):
     def omit_redundant(self) -> "BaseDataset":
         pass
 
+
+    @property
+    def numeric_columns(self):
+        return [
+            col
+            for col in self.select_dtypes(include="number")
+            if not np.isin(self[col].dropna().unique(), [0, 1]).all()
+        ]
+
+    @property
+    def binary_columns(self):
+        return [
+            col for col in self if np.isin(self[col].dropna().unique(), [0, 1]).all()
+        ]
+
     def categorize(self, categories=None) -> "BaseDataset":
         r = self.apply(lambda x: x.replace({True: 1.0, False: 0.0}))
 

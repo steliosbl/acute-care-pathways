@@ -13,6 +13,7 @@ from .salford_raw import (
     Pain_Ordered_Scale,
     SalfordTimeseriesPrettyPrint,
     SalfordTimeseriesUnits,
+    _timeseries_labelling
 )
 from .icd10 import ICD10Table
 from .ccs import CCSTable
@@ -52,7 +53,7 @@ class SalfordData(pd.DataFrame):
         raises ValueError if drop_cols is passed and return_df=True, as this makes no sense
         """
         if return_df:
-            return df.reindex(index=self.index, columns=col_names)
+            return df.reindex(index=self.index)
 
         r = self.copy()
         r[col_names] = df
@@ -288,6 +289,21 @@ class SalfordData(pd.DataFrame):
 
         return self._finalize_derived_feature(series, col_name, return_series)
 
+    def derive_assisted_breathing(self, return_df=False):
+        """ Identify assisted breathing patients from the breathing device
+        :returns: New SalfordData instance with the new features added
+            if return_series: pd.DataFrame instance of the new feature
+        """
+
+        columns = [f'Obs_AssistedBreathing_{_}' for _ in _timeseries_labelling]
+
+        df = pd.concat([
+            (~self[breathing_device_instance].__eq__('A - AIR')).rename(columns[i])
+            for i, breathing_device_instance in enumerate(SalfordTimeseries['Obs_BreathingDevice'])
+        ], axis=1)
+
+        return self._finalize_derived_feature_wide(df, columns, return_df)
+
     def derive_icd10_3codes(self, return_df=False, clean_icd10=True):
         """ Converts the ICD-10 diagnosis entries to 3-codes (e.g., "X10.31" -> "X10")
         :param clean_icd10: Whether to standardise the ICD-10 codes first
@@ -378,6 +394,7 @@ class SalfordData(pd.DataFrame):
                     self.derive_sdec(return_series=True),
                     # self.derive_ae_diagnosis_stems(return_series=True),
                     self.derive_charlson_index(return_series=True),
+                    self.derive_assisted_breathing(return_df=True)
                 ],
                 axis=1,
             )
@@ -435,9 +452,6 @@ class SalfordData(pd.DataFrame):
         df = df[~(df.PatientNumber.isna() | df.Age.isna())].copy()
         df.Age = df.Age.astype(int)
         df.PatientNumber = df.PatientNumber.astype(int)
-
-        # Filter patients under 16
-        df = df[df.Age >= 16].copy()
 
         # Convert the following columns to bool
         binarize = [
@@ -549,6 +563,26 @@ class SalfordData(pd.DataFrame):
         df[columns] = df[columns].apply(lambda s: s.str.strip())
 
         return cls(df).clean_icd10().clean_obs()
+
+    def inclusion_exclusion_criteria(self):
+        df = self
+
+        # Filter patients under 16
+        mask = (df.Age >= 18)
+
+        # Filter patients with NIV
+        mask &= (df.Obs_BreathingDevice_Admission != 'NIV - NIV')
+
+        # Filter booked admissions and electives, maternity, and trauma
+        mask &= (~df.AdmitMethod.isin(['BOOKED ADMISSION', 'ELECTIVE PLANNED', 'MATERNITY ANTE NATAL', 'TRAUMA ELECTIVE ADM', 'WAITING LIST']))
+
+        # Start at 2015-01-01
+        mask &= (df.AdmissionDate >= '2015-01-01')
+
+        # Mandate NEWS on admission
+        mask &= df.First_NEWS.notna().all(axis=1)
+
+        return SalfordData(df[mask].copy())
 
     def clean_icd10(self, return_df=False):
         """ Standardises the ICD-10 diagnosis entries to match the lookup table 
@@ -939,6 +973,7 @@ def _generate_salford_feature_combinations():
         "Obs_SystolicBP_Admission",
         "Obs_HeartRate_Admission",
         "Obs_AVCPU_Admission",
+        "Obs_AssistedBreathing_Admission"
     ]
     r['with_phenotype'] = r['news'] + [
         "Obs_BreathingDevice_Admission",

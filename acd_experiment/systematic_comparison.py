@@ -213,7 +213,7 @@ def get_xy(scii, estimator, features, outcome_within=1, outcome="CriticalEvent")
 
     X, y = scii.xy(**sci_args)
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.33, random_state=42, shuffle=False
+        X, y, test_size=0.33, shuffle=False
     )
     return type(scii)(X_train), type(scii)(X_test), y_train, y_test
 

@@ -118,7 +118,7 @@ class SalfordAdapter(SalfordData, BaseDataset):
             X = X.fill_na()
 
         if ordinal_encoding:
-            raise NotImplementedError()
+            X = X.ordinal_encode_categories()
         elif onehot_encoding:
             cat_cols = X.select_dtypes(include="category").columns
             X = X.onehot_encode_categories()

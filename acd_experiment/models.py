@@ -8,6 +8,7 @@ from sklearn.base import BaseEstimator
 from sklearn.linear_model import LogisticRegression, SGDClassifier, SGDOneClassSVM
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 
+from imblearn.pipeline import Pipeline as ImbPipeline
 # from imblearn.over_sampling import SMOTENC
 # from imblearn.under_sampling import RandomUnderSampler
 # from imblearn import FunctionSampler
@@ -65,42 +66,47 @@ class Estimator:
             not cls._requirements["onehot"] and not cls._requirements["ordinal"]
         )
         X = X_test.ordinal_encode_categories() if ordinal_encode else X_test
+
+        classifiers = [_.estimator for _ in model.calibrated_classifiers_]
+        if type(classifiers[0]) == ImbPipeline:
+            classifiers = [_[cls._name] for _ in classifiers]
+        
         if cls._requirements["scaling"]:
             X_trains, X_tests = (
                 [
-                    _.base_estimator["Scaling"].fit_transform(X_train)
+                    _.estimator["Scaling"].fit_transform(X_train)
                     for _ in model.calibrated_classifiers_
                 ],
                 [
-                    _.base_estimator["Scaling"].fit_transform(X)
+                    _.estimator["Scaling"].fit_transform(X)
                     for _ in model.calibrated_classifiers_
                 ],
             )
         else:
             X_trains, X_tests = (
-                [X_train for _ in model.calibrated_classifiers_],
-                [X for _ in model.calibrated_classifiers_],
+                [X_train for _ in classifiers],
+                [X for _ in classifiers],
             )
 
         if cv_jobs > 1:
-            explainers = Parallel(n_jobs=cv_jobs, verbose=10)(
+            explainers = Parallel(n_jobs=cv_jobs, verbose=0)(
                 delayed(
                     cls._explainer(
-                        _.estimator,
+                        _,
                         masker=X_trains[i],
                         **cls._explainer_args,
                     )
                 )(X_tests[i])
-                for i, _ in enumerate(model.calibrated_classifiers_)
+                for i, _ in enumerate(classifiers)
             )
         else:
             explainers = [
                 cls._explainer(
-                    _.estimator,
+                    _,
                     masker=X_trains[i],
                     **cls._explainer_args,
                 )(X_tests[i])
-                for i, _ in enumerate(model.calibrated_classifiers_)
+                for i, _ in enumerate(classifiers)
             ]
 
         shap_values = shap.Explanation(
