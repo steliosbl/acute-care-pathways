@@ -426,6 +426,10 @@ class SalfordData(pd.DataFrame):
 
         return df
 
+    def categorical_columns(self, feature_set=None):
+        feature_set = feature_set or self.columns
+        return self[feature_set].select_dtypes(include=["object", 'category']).columns
+
     @classmethod
     def from_raw(cls, raw):
         """ Applies initial pre-processing steps to the raw dataset, extracted from xlsx """
@@ -581,6 +585,9 @@ class SalfordData(pd.DataFrame):
 
         # Mandate NEWS on admission
         mask &= df.First_NEWS.notna().all(axis=1)
+
+        # Mandate AIM
+        mask &= df.AdmissionSpecialty.isin(['AIM', 'AE', 'MED', 'GER', 'CCM'])
 
         return SalfordData(df[mask].copy())
 
@@ -944,6 +951,7 @@ SalfordPrettyPrint = (
         "SentToSDEC": "SDEC Allocation",
         "AE_MainDiagnosis": "Emergency Department Diagnosis",
         "CharlsonIndex": "Charlson Index",
+        "Obs_AssistedBreathing_Admission": "First Obs Assisted Breathing"
     }
     | SalfordTimeseriesPrettyPrint
 )
@@ -985,7 +993,7 @@ def _generate_salford_feature_combinations():
 
     r["with_composites"] = r["with_phenotype"] + SalfordFeatures.CompositeScores + ['CharlsonIndex']
     r["with_labs"] = r["with_composites"] + SalfordFeatures.First_Blood
-    r["with_services"] = r["with_labs"] + ["AdmitMethod", "AdmissionSpecialty", "SentToSDEC", "Readmission"]
+    r["with_services"] = r["with_labs"] + ["AdmitMethod", "SentToSDEC", "Readmission"]
     return r
 
 SalfordCombinations = _generate_salford_feature_combinations()
