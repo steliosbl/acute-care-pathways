@@ -233,6 +233,16 @@ class SalfordData(pd.DataFrame):
 
         return self._finalize_derived_feature(stems, col_name, return_series)
 
+    def derive_age_band(self, col_name='AgeBand', return_series=True, bins=[17, 29, 49, 64, 79, 120], labels=['18 - 29', '30 - 49', '50 - 64', '65 - 79', '80+']):
+        """ Discretise the patient age into demographic bands
+        :returns: New SalfordData instance with the new column added
+            if return_series: pd.Series instance of the new feature
+        """
+        age_bands = pd.cut(self.Age, bins=bins, labels=labels)
+
+        return self._finalize_derived_feature(age_bands, col_name, return_series)
+
+        
     def derive_charlson_index(
         self, col_name="CharlsonIndex", return_series=False, comorbidities_lookup=None
     ):
@@ -400,7 +410,7 @@ class SalfordData(pd.DataFrame):
             )
         )
 
-    def convert_str_to_categorical(self, columns=None, inplace=True):
+    def convert_str_to_categorical(self, columns=None, inplace=True, subset=None):
         """ Transforms all string columns into categorical types. Obs_AVCPU and Obs_Pain are ordinal (ordered categorical)
         :columns: List of columns to convert. If empty, selects all string/object type columns
         :returns SalfordData instance with the columns altered 
@@ -421,7 +431,8 @@ class SalfordData(pd.DataFrame):
         df[pain] = df[pain].apply(lambda s: s.astype(category))
 
         # Rest
-        columns = columns or df.select_dtypes("object").columns
+        subset = subset or df.columns
+        columns = columns or df[subset].select_dtypes("object").columns
         df[columns] = df[columns].astype("category")
 
         return df
@@ -431,8 +442,11 @@ class SalfordData(pd.DataFrame):
         return self[feature_set].select_dtypes(include=["object", 'category']).columns
 
     @classmethod
-    def from_raw(cls, raw):
+    def from_raw(cls, raw, verbose=False):
         """ Applies initial pre-processing steps to the raw dataset, extracted from xlsx """
+        if verbose:
+            print(f'Initial dataset size: {raw.shape[0]}')
+        
         # Get rid of various unnecessary columns, such as timeseries collection dates
         df = raw.drop(RedundantColumns, axis=1)
 
@@ -449,13 +463,19 @@ class SalfordData(pd.DataFrame):
         # Reindex by spellserial, as numbering from excel is inconsistent
         df = df.set_index("SpellSerial")
 
-        # Remove patients who have not been discharged yet
-        df = df[df.LOSBand != "Still In"]
-
         # Filter patients without an ID or age, at minimum, and make these columns integers
-        df = df[~(df.PatientNumber.isna() | df.Age.isna())].copy()
+        mask = (df.PatientNumber.isna() | df.Age.isna())
+        df = df[~mask]
         df.Age = df.Age.astype(int)
         df.PatientNumber = df.PatientNumber.astype(int)
+        if verbose:
+            print(f'Removed {mask.sum()} patients without a valid NHS number or age: {df.shape[0]}')
+
+        # Remove patients who have not been discharged yet
+        mask = df.LOSBand == "Still In"
+        df = df[~mask]
+        if verbose:
+            print(f'Removed {mask.sum()} patients not discharged yet: {df.shape[0]}')
 
         # Convert the following columns to bool
         binarize = [
@@ -568,28 +588,43 @@ class SalfordData(pd.DataFrame):
 
         return cls(df).clean_icd10().clean_obs()
 
-    def inclusion_exclusion_criteria(self):
+    def inclusion_exclusion_criteria(self, verbose=False):
         df = self
 
-        # Filter patients under 16
-        mask = (df.Age >= 18)
+        # Start at 2015-01-01
+        mask = (df.AdmissionDate < '2015-01-01')
+        df = df[~mask]
+        if verbose:
+            print(f'Removed {mask.sum()} cases before Jan 1st 2015: {df.shape[0]}')
+
+        # Filter patients under 18
+        mask = (df.Age < 18)
 
         # Filter patients with NIV
-        mask &= (df.Obs_BreathingDevice_Admission != 'NIV - NIV')
+        mask &= (df.Obs_BreathingDevice_Admission == 'NIV - NIV')
+        df = df[~mask]
+        if verbose:
+            print(f'Removed {mask.sum()} records under 18 years old: {df.shape[0]}')
 
         # Filter booked admissions and electives, maternity, and trauma
-        mask &= (~df.AdmitMethod.isin(['BOOKED ADMISSION', 'ELECTIVE PLANNED', 'MATERNITY ANTE NATAL', 'TRAUMA ELECTIVE ADM', 'WAITING LIST']))
-
-        # Start at 2015-01-01
-        mask &= (df.AdmissionDate >= '2015-01-01')
+        mask = df.AdmitMethod.isin(['BOOKED ADMISSION', 'ELECTIVE PLANNED', 'MATERNITY ANTE NATAL', 'TRAUMA ELECTIVE ADM', 'WAITING LIST'])
+        df = df[~mask]
+        if verbose:
+            print(f'Removed {mask.sum()} booked admissions, elective admissions, maternity, and trauma cases: {df.shape[0]}')
 
         # Mandate NEWS on admission
-        mask &= df.First_NEWS.notna().all(axis=1)
+        mask = ~df[SalfordFeatures.First_NEWS].notna().all(axis=1)
+        df = df[~mask]
+        if verbose:
+            print(f'Removed {mask.sum()} records without, at minimum, recorded NEWS: {df.shape[0]}')
 
         # Mandate AIM
-        mask &= df.AdmissionSpecialty.isin(['AIM', 'AE', 'MED', 'GER', 'CCM'])
+        mask = ~df.AdmissionSpecialty.isin(['AIM', 'AE', 'MED', 'GER', 'CCM']) 
+        df = df[~mask]
+        if verbose:
+            print(f'Removed {mask.sum()} records to limit cases to acute medical admissions: {df.shape[0]}')
 
-        return SalfordData(df[mask].copy())
+        return SalfordData(df.copy())
 
     def clean_icd10(self, return_df=False):
         """ Standardises the ICD-10 diagnosis entries to match the lookup table 
@@ -983,17 +1018,22 @@ def _generate_salford_feature_combinations():
         "Obs_AVCPU_Admission",
         "Obs_AssistedBreathing_Admission"
     ]
-    r['with_phenotype'] = r['news'] + [
+    r['with_phenotype'] = [
         "Obs_BreathingDevice_Admission",
         "Obs_DiastolicBP_Admission",
         "Obs_Pain_Admission",
         "Obs_Nausea_Admission",
         "Obs_Vomiting_Admission",
-    ] + SalfordFeatures.Demographics
+    ] + SalfordFeatures.Demographics + SalfordFeatures.CompositeScores + ['CharlsonIndex']
+    r["with_labs"] = SalfordFeatures.First_Blood
+    r["with_services"] = ["AdmitMethod", "SentToSDEC", "Readmission"]#, 'AdmissionSpecialty']
 
-    r["with_composites"] = r["with_phenotype"] + SalfordFeatures.CompositeScores + ['CharlsonIndex']
-    r["with_labs"] = r["with_composites"] + SalfordFeatures.First_Blood
-    r["with_services"] = r["with_labs"] + ["AdmitMethod", "SentToSDEC", "Readmission"]
-    return r
+    d = DotDict()
+    d['news'] = r['news']
+    d['with_phenotype'] = d['news'] + r['with_phenotype']
+    d['with_labs'] = d['with_phenotype'] + r['with_labs']
+    d['with_services'] = d['with_labs'] + r['with_services']
 
-SalfordCombinations = _generate_salford_feature_combinations()
+    return r, d
+
+SalfordCombinations = _generate_salford_feature_combinations()[1]

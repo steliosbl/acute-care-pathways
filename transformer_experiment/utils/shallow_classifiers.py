@@ -22,7 +22,7 @@ from sklearn.metrics import (
 
 from aif360.sklearn.metrics.metrics import intersection
 
-from salford_datasets.salford import SalfordData
+from salford_datasets.salford import SalfordData, SalfordCombinations
 
 def bootstrap_metric(metric, y_true, y_score, n_resamples=9999):
     """ Computes AUROC with 95% confidence intervals by boostrapping """
@@ -122,13 +122,19 @@ def load_salford_dataset(re_derive=False, data_dir=Path('data/Salford')):
         logging.info('Deriving from raw dataset')
         sal = SalfordData.from_raw(
             pd.read_hdf(data_dir/'raw_v2.h5', 'table')
-        ).inclusion_exclusion_criteria().augment_derive_all().expand_icd10_definitions().sort_values('AdmissionDate')
+        )
+        sal = SalfordData(
+            sal.inclusion_exclusion_criteria()
+            .augment_derive_all()
+            .expand_icd10_definitions()
+            .sort_values('AdmissionDate')
+        )
         sal.to_hdf(data_dir/'sal_processed_transformers.h5', 'table')
     else:
         logging.info('Loading processed dataset')
         sal = SalfordData(pd.read_hdf(data_dir/'sal_processed_transformers.h5', 'table').sort_values('AdmissionDate')).inclusion_exclusion_criteria()
 
-    return sal
+    return sal.convert_str_to_categorical(subset=SalfordCombinations['with_services'])
 
 def get_train_test_indexes(sal, test_size=0.33):
     train_idx, test_idx = train_test_split(sal.index, shuffle=False, test_size=test_size)

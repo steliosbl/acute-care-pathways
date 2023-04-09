@@ -43,17 +43,13 @@ from sklearn.model_selection import train_test_split
 from acd_experiment.sci import SCIData, SCICols
 import shap
 
+from salford_datasets.utils import DotDict
 
-def dict_product(dicts):
-    """
-    >>> list(dict_product(dict(number=[1,2], character='ab')))
-    [{'character': 'a', 'number': 1},
-     {'character': 'a', 'number': 2},
-     {'character': 'b', 'number': 1},
-     {'character': 'b', 'number': 2}]
-    """
-    return (dict(zip(dicts, x)) for x in product(*dicts.values()))
-
+BERTModels = DotDict(
+    BioClinicalBert="emilyalsentzer/Bio_ClinicalBERT",
+    Bert="distilbert-base-uncased",
+    PubMedBert="ml4pubmed/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext_pub_section"
+)
 
 def bootstrap_metric(metric, y_true, y_score, n_resamples=9999):
     """ Computes AUROC with 95% confidence intervals by boostrapping """

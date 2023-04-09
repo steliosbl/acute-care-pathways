@@ -172,7 +172,7 @@ def finetuned_inference(model, dataset, batch_size):
 
         y_pred_proba = F.softmax(y_pred_logit, dim=1)[:,1]
         
-    return y_pred_proba
+    return y_pred_proba.cpu().detach().numpy()
 
 # %%
 from sklearn.model_selection import train_test_split
@@ -253,20 +253,26 @@ def run_finetuning_4(experiment_num='41', bert_variant='BioClinicalBert', batch_
     with open(Notebook.CACHE_DIR/model_directory/'test_pred_proba.bin', 'wb') as file:
         pickle.dump(y_pred_proba, file)
 
+from transformer_experiment.utils.shallow_classifiers import load_salford_dataset, get_train_test_indexes
 
 def run_inference_4(experiment_num='41', bert_variant='BioClinicalBert', batch_size=56):
     feature_set = EXPERIMENT_FEATURE_SETS[experiment_num]
     model_uri = BERTModels[bert_variant]
     
-    model_directory, checkpoint_dir = get_checkpoint_directory(experiment_num, bert_variant)
+    #model_directory, checkpoint_dir = get_checkpoint_directory(experiment_num, bert_variant)
+    model_directory = f'bert_{bert_variant}_{experiment_num}' 
 
-    _, sal_bert_test = load_tokenised_dataset_cached(bert_variant, experiment_num)
+    _, sal_bert_test = load_tokenised_dataset_cached(bert_variant, experiment_num, feature_set)
 
-    model = AutoModelForSequenceClassification.from_pretrained(checkpoint_dir).to(Notebook.DEVICE).eval()
+    model = AutoModelForSequenceClassification.from_pretrained(Notebook.CACHE_DIR/model_directory/'best_model').to(Notebook.DEVICE).eval()
 
-    y_pred_proba = finetuned_inference(model, sal_bert_test)
-    
-    with open(Notebook.CACHE_DIR/model_directory/'test_pred_proba.bin', 'wb') as file:
+    _, sal_test_idx, _, _ = get_train_test_indexes(load_salford_dataset(Notebook.RE_DERIVE, Notebook.DATA_DIR))
+    idx_mask = sal_bert_test._avail_idx & sal_bert_test._avail_idx.isin(sal_test_idx)
+
+    y_pred_proba = finetuned_inference(model, sal_bert_test, batch_size)
+    y_pred_proba = pd.Series(y_pred_proba[idx_mask], index=idx_mask[idx_mask].index)
+
+    with open(Notebook.CACHE_DIR/model_directory/'test_pred_proba_indexed.bin', 'wb') as file:
         pickle.dump(y_pred_proba, file)
 
 
@@ -277,7 +283,7 @@ if __name__ == '__main__':
     parser = construct_parser()
     args = parser.parse_args()
 
-    run_finetuning_4(args.experiment, args.model, args.batch_size, args.debug)
-    #run_inference_4(args.experiment, args.model, args.batch_size)
+    #run_finetuning_4(args.experiment, args.model, args.batch_size, args.debug)
+    run_inference_4(args.experiment, args.model, args.batch_size)
 
 
