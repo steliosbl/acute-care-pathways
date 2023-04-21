@@ -10,7 +10,7 @@ class SalfordAdapter(SalfordData, BaseDataset):
 
     def omit_redundant(self):
         return SalfordAdapter(
-            self.drop(
+            self.drop(columns=
                 SalfordFeatures.Admin
                 + SalfordFeatures.Spell
                 + SalfordFeatures.Discharge

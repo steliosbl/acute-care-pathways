@@ -1007,17 +1007,20 @@ SalfordFeatureUnits = (
     }
 )
 
-def _generate_salford_feature_combinations():
+def _generate_salford_feature_combinations(scored=False):
     r = DotDict()
-    r['news'] = [
-        "Obs_RespiratoryRate_Admission",
-        "Obs_O2Sats_Admission",
-        "Obs_Temperature_Admission",
-        "Obs_SystolicBP_Admission",
-        "Obs_HeartRate_Admission",
-        "Obs_AVCPU_Admission",
-        "Obs_AssistedBreathing_Admission"
-    ]
+    if scored:
+        r['news'] = SalfordFeatures.First_NEWS
+    else:
+        r['news'] = [
+            "Obs_RespiratoryRate_Admission",
+            "Obs_O2Sats_Admission",
+            "Obs_Temperature_Admission",
+            "Obs_SystolicBP_Admission",
+            "Obs_HeartRate_Admission",
+            "Obs_AVCPU_Admission",
+            "Obs_AssistedBreathing_Admission"
+        ]
     r['with_phenotype'] = [
         "Obs_BreathingDevice_Admission",
         "Obs_DiastolicBP_Admission",

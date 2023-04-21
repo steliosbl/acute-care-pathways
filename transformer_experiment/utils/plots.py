@@ -323,7 +323,7 @@ def generalized_entropy_curve(y_true, y_pred_proba, prot_attr=None, function=gen
             for _ in thresholds]
     return recall[:-1], r
 
-def plot_entropy_curves(y_true, y_preds, prot_attr=None, baseline_key=None, ylabel='Generalised Entropy Index', ax=None, palette=sns.color_palette("deep"), title='Equalised Odds', function=generalized_entropy_error):
+def plot_entropy_curves(y_true, y_preds, prot_attr=None, baseline_key=None, ylabel='Generalised Entropy Index', ax=None, palette=sns.color_palette("deep"), title='Equalised Odds', function=generalized_entropy_error, ci='sd'):
     no_ax = ax is None
     if no_ax:
         sns.set_style("white")
@@ -334,7 +334,7 @@ def plot_entropy_curves(y_true, y_preds, prot_attr=None, baseline_key=None, ylab
         linestyle = "--" if modelkey == baseline_key else "-"
         color = "tomato" if modelkey == baseline_key else palette[idx]
         x, y = generalized_entropy_curve(y_true, y_pred_proba, prot_attr, function=function)
-        sns.lineplot(x=x, y=y, label=modelkey, linewidth=2, linestyle=linestyle, color=color, ax=ax)
+        sns.lineplot(x=x, y=y, label=modelkey, linewidth=2, linestyle=linestyle, color=color, ax=ax, ci=ci)
     
     ax.legend(loc="upper right")
     # sns.move_legend(ax, "center left", bbox_to_anchor=(1, 0.5))

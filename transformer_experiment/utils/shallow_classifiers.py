@@ -197,3 +197,13 @@ def bootstrap_bias_amplification(y_true, y_score, prot_attr, n_resamples=99):
         random_state=42,
     )
     return res.confidence_interval.low, center, res.confidence_interval.high
+
+def get_calibrated_regression_coefficients(model, pipeline_key=None):
+    models = [_.estimator for _ in model.calibrated_classifiers_]
+    if pipeline_key:
+        models = [_[pipeline_key] for _ in models]
+
+    return pd.DataFrame(
+        zip(np.array([_.coef_[0] for _ in models]).mean(axis=0), model.feature_names_in_),
+        columns=["Coefficient", "Feature"],
+    )

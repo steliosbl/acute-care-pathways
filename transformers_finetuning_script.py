@@ -267,7 +267,7 @@ def run_inference_4(experiment_num='41', bert_variant='BioClinicalBert', batch_s
     model = AutoModelForSequenceClassification.from_pretrained(Notebook.CACHE_DIR/model_directory/'best_model').to(Notebook.DEVICE).eval()
 
     _, sal_test_idx, _, _ = get_train_test_indexes(load_salford_dataset(Notebook.RE_DERIVE, Notebook.DATA_DIR))
-    idx_mask = sal_bert_test._avail_idx & sal_bert_test._avail_idx.isin(sal_test_idx)
+    idx_mask = sal_bert_test._avail_idx & sal_bert_test._avail_idx.index.isin(sal_test_idx)
 
     y_pred_proba = finetuned_inference(model, sal_bert_test, batch_size)
     y_pred_proba = pd.Series(y_pred_proba[idx_mask], index=idx_mask[idx_mask].index)
