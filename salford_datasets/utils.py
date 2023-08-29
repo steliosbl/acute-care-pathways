@@ -43,6 +43,7 @@ def justify(df, invalid_val=np.nan, axis=1, side="left"):
 
     return pd.DataFrame(out, columns=df.columns, index=df.index)
 
+
 class Series:
     @staticmethod
     def topn_freq_values(s, n=10, sentinel=np.nan):
@@ -76,13 +77,13 @@ class Series:
         return s
 
 
-def row_to_text(row, column_name=False):
+def row_to_text(row, column_name=False, sep=' [SEP] '):
     text = ''
 
     for i, c in enumerate(row):
         if column_name:
             text += f"{row.index[i]}: "
 
-        text += str(c) + ' [SEP] '
+        text += str(c) + sep
 
     return text

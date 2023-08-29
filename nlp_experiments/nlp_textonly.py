@@ -4,6 +4,7 @@ import pandas as pd
 import argparse
 import torch
 import os
+import pickle
 
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer
 from datasets import Dataset, interleave_datasets
@@ -15,7 +16,8 @@ from acd_experiment.salford_adapter import SalfordAdapter
 from .whole_nlp import compute_metric, CustomTrainer
 
 
-def get_textonly_dataset(data_path, target, text_features, demographics=True, column_name=True):
+def get_textonly_dataset(data_path, target, text_features, demographics=True, column_name=True,
+                         extracted_entity_path=None, split='whole'):
     """
     Load SalfordDataset with deired text features
     :param data_path: str, Path to HDF5 file
@@ -24,11 +26,42 @@ def get_textonly_dataset(data_path, target, text_features, demographics=True, co
     :param text_features: str, Features to get. Must be one of ['triage', 'triage_diagnosis', 'triage_complaint']
     :param demographics: bool, If True append patient demographics as text
     :param column_name: bool, If True prepend column names before each value
+    :param extracted_entity_path: str, if not None, load extracted entities from path and append to data
+    :param split: str, 'whole', 'val', 'train'
     :return: pd.DataFrame of desired features, str of the metric to use when choosing the best model,
     int of number of distinct labels in the dataset
     """
     dataset = SalfordData.from_raw(pd.read_hdf(data_path, key='table'))
     dataset = dataset.augment_derive_all()
+    dataset = dataset.inclusion_exclusion_criteria()
+
+    if split == 'train':
+        dataset = SalfordData(dataset[dataset['AdmissionDate'] < pd.to_datetime('2020-02-01')])
+    elif split == 'val':
+        dataset = SalfordData(dataset[dataset['AdmissionDate'] >= pd.to_datetime('2020-02-01')])
+
+    if extracted_entity_path:
+        with open(extracted_entity_path, 'rb') as f:
+            extracted_entities = pickle.load(f)
+
+        if len(extracted_entities) != len(dataset):
+            raise RuntimeError(f"extracted_entities must be of the same lengths as the Salford dataset! "
+                               f"Got {len(extracted_entities)} and {len(dataset)}")
+
+        # Currently only supports entities extracted with MedCAT. Get entities which are either disorders or findings
+        # Just place them in one column as text
+        extracted_disorders = {}
+        for index, e in enumerate(extracted_entities):
+            index = dataset.index[index]
+            extracted_disorders[index] = ""
+            for i in e['entities']:
+                if 'disorder' in e['entities'][i]['types'] or 'finding' in e['entities'][i]['types']:
+                    extracted_disorders[index] += e['entities'][i]['pretty_name'] + '; '
+
+        dataset['extracted entities'] = list(extracted_disorders.values())
+    else:
+        if text_features == 'extracted':
+            raise NotImplementedError("If text_features is 'extracted', --extracted-entity-path must be set")
 
     # If doing binary classification, we can use the default metrics
     metrics = None
@@ -57,7 +90,7 @@ def get_textonly_dataset(data_path, target, text_features, demographics=True, co
     elif target == "ReadmissionBand":
         # the .fillna call in derive_readmission_band means a SalfordData instance isn't returned
         dataset = SalfordData(dataset.derive_readmission_band())
-
+        
         metrics = ['accuracy']
         best_metric = 'loss'
         num_labels = len(dataset[target].unique())
@@ -72,12 +105,24 @@ def get_textonly_dataset(data_path, target, text_features, demographics=True, co
         dataset = SalfordData(dataset.derive_is_readmitted_reason(col_name="ReadmittedPneumonia"))
     elif target == "CriticalEvent":
         dataset = dataset.derive_critical_event(wards=["CCU", "HH1M"], ignore_admit_ward=False)
+    elif target == "SDECSuitability":
+        dataset = dataset.derive_sdec_suitability()
+
+        metrics = ['accuracy']
+        best_metric = 'loss'
+        num_labels = len(dataset[target].unique())
+        print(f"Num labels: {num_labels}")
+    elif target == "SDECSuitabilityBinary":
+        dataset = dataset.derive_sdec_suitable()
+        target = "SDECSuitable"
 
     # Get the columns to keep
     if text_features == 'triage':
         columns = ['AE_TriageNote']
     elif text_features == 'triage_diagnosis':
         columns = ['AE_TriageNote', 'AE_MainDiagnosis']
+    elif text_features == 'extracted':
+        columns = ['extracted entities']
     else:
         columns = ['AE_TriageNote', 'AE_PresentingComplaint']
 
@@ -105,16 +150,18 @@ def main():
     parser = argparse.ArgumentParser(description='Train a transformer on text fields in SalfordData')
 
     parser.add_argument('--data-path', type=str, help='Path to the raw dataset HDF5 file', required=True)
-    parser.add_argument('--text-features', choices=['triage', 'triage_diagnosis', 'triage_complaint'],
+    parser.add_argument('--text-features', choices=['triage', 'triage_diagnosis', 'triage_complaint', 'extracted'],
                         default='triage', help='The combination of text features to include')
     parser.add_argument('--demographics', action='store_true', help='Include (text-encoded) patient demographics')
     parser.add_argument("--sampling", help="Use under/oversampling", choices=['under', 'over', None], default=None)
     parser.add_argument("--column-name", help="Prepend column name before value in text representation",
                         action="store_true")
     parser.add_argument("--target", choices=["CriticalEvent", "Ethnicity", "SentToSDEC", "LOSBand", "Readmission",
-                                             "ReadmissionBand", "ReadmissionPneumonia", "EthnicityHA",
-                                             "Readmitted", "ReadmittedPneumonia"],
+                                             "ReadmissionBand", "ReadmissionPneumonia", "EthnicityHA", "Readmitted",
+                                             "ReadmittedPneumonia", "SDECSuitability", "SDECSuitabilityBinary"],
                         default="CriticalEvent", help="Target variable to predict")
+    parser.add_argument("--extracted-entity-path", type=str, default=None,
+                        help="Path to extracted entities from triage notes. If None, don't use any")
 
     parser.add_argument('--model-name', type=str,
                         default='ml4pubmed/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext_pub_section',
@@ -127,9 +174,11 @@ def main():
     args = parser.parse_args()
 
     multiclass = args.target not in ["CriticalEvent", "SentToSDEC", "Readmission", "ReadmissionPneumonia", "Readmitted",
-                                     "ReadmittedPneumonia"]
+                                     "ReadmittedPneumonia", "SDECSuitabilityBinary"]
     dataset, best_metric, metrics, num_labels = get_textonly_dataset(args.data_path, args.target, args.text_features,
-                                                                     args.demographics, args.column_name)
+                                                                     args.demographics, args.column_name,
+                                                                     args.extracted_entity_path,
+                                                                     split='train')
 
     # Get model, tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=True, device=0)

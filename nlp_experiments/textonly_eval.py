@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import os
 
+from sklearn.metrics import recall_score
+
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 from datasets import Dataset
 from transformers.pipelines.pt_utils import KeyDataset
@@ -23,13 +25,17 @@ def main():
     parser = argparse.ArgumentParser(description='Evaluate trained HF models on text only')
 
     parser.add_argument('--data-path', type=str, help='Path to the raw dataset HDF5 file', required=True)
-    parser.add_argument('--text-features', choices=['triage', 'triage_diagnosis', 'triage_complaint'],
+    parser.add_argument('--text-features', choices=['triage', 'triage_diagnosis', 'triage_complaint', 'extracted'],
                         default='triage', help='The combination of text features to include')
     parser.add_argument('--demographics', action='store_true', help='Include (text-encoded) patient demographics')
+    parser.add_argument("--column-name", help="Prepend column name before value in text representation",
+                        action="store_true")
     parser.add_argument("--target", choices=["CriticalEvent", "Ethnicity", "SentToSDEC", "LOSBand", "Readmission",
-                                             "ReadmissionBand", "ReadmissionPneumonia", "EthnicityHA",
-                                             "Readmitted", "ReadmittedPneumonia"],
+                                             "ReadmissionBand", "ReadmissionPneumonia", "EthnicityHA", "Readmitted",
+                                             "ReadmittedPneumonia", "SDECSuitability", "SDECSuitabilityBinary"],
                         default="CriticalEvent", help="Target variable to predict")
+    parser.add_argument("--extracted-entity-path", type=str, default=None,
+                        help="Path to extracted entities from triage notes. If None, don't use any")
 
     parser.add_argument('--model-name', type=str,
                         default='ml4pubmed/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext_pub_section',
@@ -40,8 +46,9 @@ def main():
     args = parser.parse_args()
 
     multiclass = args.target not in ["CriticalEvent", "SentToSDEC", "Readmission", "ReadmissionPneumonia", "Readmitted",
-                                     "ReadmittedPneumonia"]
-    dataset, _, _, num_labels = get_textonly_dataset(args.data_path, args.target, args.text_features, args.demographics)
+                                     "ReadmittedPneumonia", "SDECSuitabilityBinary"]
+    dataset, _, _, num_labels = get_textonly_dataset(args.data_path, args.target, args.text_features, args.demographics,
+                                                     args.column_name, args.extracted_entity_path, split='val')
 
     # Get model, tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=True, device=0)
@@ -75,6 +82,12 @@ def main():
         metrics = []
     else:
         metrics = get_metrics(pd.DataFrame(encoded_dataset['test']['label']), pred_labels, pred_proba)
+
+        # Add sensitivity, which isn't included in get_metrics
+        # (Not added it there to keep compatability with old code)
+        # Remember that specificity is the sensitivity of the negative class
+        spec = recall_score(encoded_dataset['test']['label'], pred_labels, pos_label=0)
+        metrics['specificity'] = spec
 
     text = f"-------- {args.model_name} EVALn ---------\n\n{metrics}"
 

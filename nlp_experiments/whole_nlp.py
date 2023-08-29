@@ -5,6 +5,7 @@ import argparse
 import torch
 import torch.nn as nn
 import os
+import pickle
 
 from sklearn.impute import SimpleImputer
 
@@ -18,7 +19,7 @@ from acd_experiment.salford_adapter import SalfordAdapter
 
 
 def get_text_dataset(data_path, select_features, outcome, old_only=False, old_data_path=None, column_name=False,
-                     impute=False):
+                     impute=False, extracted_entity_path=None, split='whole'):
     """ Load SalfordData and convert tabular data to a single text string
     :param data_path: str, path to Salford HDF5 file
     :param select_features: Type of features to use
@@ -27,10 +28,19 @@ def get_text_dataset(data_path, select_features, outcome, old_only=False, old_da
     :param old_data_path: Path to the original data, must be passed if old_only is True
     :param column_name: if True, prepend column name before value in text representation
     :param impute: if True, replace missing values with median
+    :param extracted_entity_path: str, if not None, load extracted entities from path and append to data
+    :param split: str, 'whole', 'val', 'train'
     :return SalfordData:
     """
     dataset = SalfordData.from_raw(pd.read_hdf(data_path, key='table'))
-    dataset = SalfordData(dataset[dataset['Age'] >= 18]).augment_derive_all()
+    dataset = dataset.augment_derive_all()
+    dataset = dataset.inclusion_exclusion_criteria()
+
+    if split == 'train':
+        dataset = SalfordData(dataset[dataset['AdmissionDate'] < pd.to_datetime('2020-02-01')])
+    elif split == 'val':
+        # Perhaps we want to change this? Has the issue that all val set patients are during covid...
+        dataset = SalfordData(dataset[dataset['AdmissionDate'] >= pd.to_datetime('2020-02-01')])
 
     if old_only:
         print("----- Using only patients in both datasets")
@@ -69,6 +79,8 @@ def get_text_dataset(data_path, select_features, outcome, old_only=False, old_da
         columns = scores_with_notes_labs_and_hospital + new_features
     elif select_features == 'new_no_adm':
         columns = scores_with_notes_labs_and_hospital[:-1] + new_features
+    elif select_features == 'new_no_adm_triagenotes':
+        columns = scores_with_notes_labs_and_hospital[:-1] + new_features
     elif select_features == 'new_triagenotes':
         columns = scores_with_notes_labs_and_hospital + new_features
     elif select_features == 'sci_triagenotes':
@@ -93,12 +105,41 @@ def get_text_dataset(data_path, select_features, outcome, old_only=False, old_da
         outcome_col = 'LOSBand'
     elif outcome == 'readm':
         outcome_col = 'Readmission'
+    elif outcome == "Readmitted":
+        dataset = SalfordData(dataset.derive_is_readmitted())
+        outcome_col = "Readmitted"
+    elif outcome == "ReadmittedPneumonia":
+        dataset = SalfordData(dataset.derive_is_readmitted_reason(col_name="ReadmittedPneumonia"))
+        outcome_col = "ReadmittedPneumonia"
 
     if impute:
         number_columns = dataset.select_dtypes(include=[float, int]).columns
 
         imp = SimpleImputer(strategy='median', missing_values=np.nan)
         dataset[number_columns] = imp.fit_transform(dataset[number_columns])
+
+    if extracted_entity_path:
+        # Place this at the start so it doesn't get cut off
+        columns.append(columns[0])
+        columns[0] = 'extracted entities'
+
+        with open(extracted_entity_path, 'rb') as f:
+            extracted_entities = pickle.load(f)
+
+        if len(extracted_entities) != len(dataset):
+            raise RuntimeError("extracted_entities must be of the same lengths as the Salford dataset!")
+
+        # Currently only supports entities extracted with MedCAT. Get entities which are either disorders or findings
+        # Just place them in one column as text
+        extracted_disorders = {}
+        for index, e in enumerate(extracted_entities):
+            index = dataset.index[index]
+            extracted_disorders[index] = ""
+            for i in e['entities']:
+                if 'disorder' in e['entities'][i]['types'] or 'finding' in e['entities'][i]['types']:
+                    extracted_disorders[index] += e['entities'][i]['pretty_name'] + '; '
+
+        dataset['extracted entities'] = list(extracted_disorders.values())
 
     if '_triagenotes' in select_features:
         # Separate TriageNote from tabular data with [SEP], then commas for tabular columns
@@ -107,6 +148,7 @@ def get_text_dataset(data_path, select_features, outcome, old_only=False, old_da
         dataset['text'] = text_series + dataset['text']
     else:
         dataset = dataset.to_text(columns=columns, column_name=column_name, target_col=outcome_col, sep_token=', ')
+
 
     return dataset
 
@@ -153,14 +195,17 @@ def main():
     parser.add_argument("--old-data-path", type=str, help="Path to the old dataset HDF5")
     parser.add_argument("--select-features", help="Limit feature groups",
                         choices=['all', 'sci', 'sci_no_adm', 'new', 'new_no_adm', 'new_triagenotes', 'sci_triagenotes',
-                                 'new_diag', 'sci_diag'], default='all')
-    parser.add_argument("--outcome", help="Outcome to predict", choices=['strict', 'h1', 'direct', 'sci'],
+                                 'new_diag', 'sci_diag', 'new_no_adm_triagenotes'], default='all')
+    parser.add_argument("--outcome", help="Outcome to predict", choices=['strict', 'h1', 'direct', 'sci', 'Readmitted',
+                                                                         'ReadmittedPneumonia'],
                         default='sci')
     parser.add_argument("--old-only", help="Use only patients in the original dataset", action="store_true")
     parser.add_argument("--sampling", help="Use under/oversampling", choices=['under', 'over', None], default=None)
     parser.add_argument("--column-name", help="Prepend column name before value in text representation",
                         action="store_true")
     parser.add_argument("--impute", action="store_true", help="Impute missing data")
+    parser.add_argument("--extracted-entity-path", type=str, default=None,
+                        help="Path to extracted entities from triage notes. If None, don't use any")
 
     parser.add_argument('--model-name', type=str,
                         default='ml4pubmed/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext_pub_section',
@@ -173,7 +218,7 @@ def main():
     args = parser.parse_args()
 
     dataset = get_text_dataset(args.data_path, args.select_features, args.outcome, args.old_only, args.old_data_path,
-                               args.column_name, args.impute)
+                               args.column_name, args.impute, args.extracted_entity_path, split='train')
     num_labels = len(dataset['label'].unique())
 
     # Get model, tokenizer

@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 import argparse
+import pickle
 
 from sklearn.impute import SimpleImputer
 from sklearn.calibration import CalibratedClassifierCV
@@ -76,6 +77,9 @@ def get_dataset(data_path, select_features, outcome, old_only=False, old_data_pa
     elif select_features == 'new_diag':
         columns = scores_with_notes_labs_and_hospital + new_features + SalfordFeatures.Diagnoses
         dataset = dataset.expand_icd10_definitions()
+    elif select_features == 'none':
+        # Only include text embeddings
+        columns = []
     else:
         columns = None
 
@@ -123,14 +127,14 @@ def main():
     parser.add_argument("--old-data-path", type=str, help="Path to the old dataset HDF5")
     parser.add_argument("--select-features", help="Limit feature groups",
                         choices=['all', 'sci', 'sci_no_adm', 'new', 'new_no_adm', 'new_triagenotes', 'new_diag',
-                                 'sci_diag'], default='all')
+                                 'sci_diag', 'none'], default='all')
     parser.add_argument("--outcome", help="Outcome to predict", choices=['strict', 'h1', 'direct', 'sci'],
                         default='sci')
     parser.add_argument("--old-only", help="Use only patients in the original dataset", action="store_true")
     parser.add_argument("--impute", action="store_true", help="Impute missing data")
     parser.add_argument("--text-embeddings", type=str, default=None, help="Path to text embeddings. If None, don't use")
 
-    parser.add_argument('--save-path', type=str, default='./', help='Directory to save model to')
+    parser.add_argument('--save-model', type=str, default='./', help='Directory to save model to')
 
     args = parser.parse_args()
 
@@ -149,7 +153,8 @@ def main():
         Recall='recall',
         AUC='roc_auc',
         AP='average_precision',
-        F2=make_scorer(fbeta_score, beta=2)
+        F2=make_scorer(fbeta_score, beta=2),
+        Spec=make_scorer(recall_score, pos_label=0)
     )
 
     lightgbm_parameters = dict(
@@ -163,9 +168,15 @@ def main():
 
     results = cross_validate(CalibratedClassifierCV(
         LGBMClassifier(**lightgbm_parameters), **calibration_parameters
-    ), X, Y, cv=5, n_jobs=1, scoring=cross_validation_metrics)
+    ), X, Y, cv=5, n_jobs=1, scoring=cross_validation_metrics, return_estimator=True)
 
     print(results)
+
+    if args.save_model:
+        with open(args.save_model, 'wb') as f:
+            pickle.dump(results['estimator'][-2], f)
+
+        print('----- Saved model to', args.save_model)
 
 
 if __name__ == '__main__':
