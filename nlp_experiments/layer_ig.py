@@ -59,8 +59,9 @@ def get_column_attributions(dataset, tokenizer, lig, columns, sample_idx, absolu
 
     # Last columns are all the structured ones
     column_attributions = {c: 0 for c in columns}
-    for i, c in enumerate(column_attributions):
-        column_attributions[c] = attr_split[i].sum()
+    if len(columns) <= len(ids_split):
+        for i, c in enumerate(column_attributions):
+            column_attributions[c] = attr_split[i].sum()
 
     return column_attributions
 
@@ -120,7 +121,7 @@ def main():
         columns = None
 
     dataset = get_text_dataset(args.data_path, args.select_features, args.outcome, args.old_only, args.old_data_path,
-                               args.column_name)
+                               args.column_name, split='val')
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, use_fast=True, device=0)
     model = AutoModelForSequenceClassification.from_pretrained(args.model_name, output_hidden_states=False,
                                                                num_labels=2, ignore_mismatched_sizes=True)
@@ -128,7 +129,7 @@ def main():
 
     encoded_dataset = Dataset.from_pandas(dataset)
     encoded_dataset = encoded_dataset.class_encode_column('label')
-    encoded_dataset = encoded_dataset.train_test_split(test_size=0.2, shuffle=True, stratify_by_column='label')
+    #encoded_dataset = encoded_dataset.train_test_split(test_size=0.2, shuffle=True, stratify_by_column='label')
 
     def forward_func(x):
         # Captum expects just the log probabilities
@@ -141,8 +142,8 @@ def main():
 
     # label, attributions
     all_column_attributions = []
-    for sample_idx in trange(len(encoded_dataset['test'])):
-        sample_column_attributions = get_column_attributions(encoded_dataset['test'],
+    for sample_idx in trange(len(encoded_dataset)):
+        sample_column_attributions = get_column_attributions(encoded_dataset,
                                                              tokenizer,
                                                              lig,
                                                              columns,
@@ -150,7 +151,7 @@ def main():
                                                              args.abs
                                                              )
 
-        all_column_attributions.append([encoded_dataset['test']['label'][sample_idx], sample_column_attributions])
+        all_column_attributions.append([encoded_dataset['label'][sample_idx], sample_column_attributions])
 
     with open(args.save_path, 'wb') as f:
         pickle.dump(all_column_attributions, f)
